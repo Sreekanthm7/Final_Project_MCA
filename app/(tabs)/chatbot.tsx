@@ -57,6 +57,7 @@ export default function ChatbotScreen() {
     setTimeout(() => {
       askNextQuestion()
     }, 1500)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

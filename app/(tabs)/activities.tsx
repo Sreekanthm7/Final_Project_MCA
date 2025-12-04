@@ -15,7 +15,7 @@ interface Activity {
   title: string
   description: string
   icon: any
-  colors: string[]
+  colors: readonly [string, string, ...string[]]
   route: string
   category: "wellness" | "therapy" | "social"
 }
@@ -25,8 +25,8 @@ const ACTIVITIES: Activity[] = [
     id: "1",
     title: "Breathing Exercise",
     description: "Deep breathing techniques for relaxation",
-    icon: "wind",
-    colors: ["#4facfe", "#00f2fe"],
+    icon: "fitness",
+    colors: ["#4facfe", "#00f2fe"] as const,
     route: "/breathing",
     category: "wellness",
   },
@@ -35,7 +35,7 @@ const ACTIVITIES: Activity[] = [
     title: "Gentle Yoga",
     description: "Simple yoga poses for flexibility",
     icon: "body",
-    colors: ["#43e97b", "#38f9d7"],
+    colors: ["#43e97b", "#38f9d7"] as const,
     route: "/yoga",
     category: "wellness",
   },
@@ -44,7 +44,7 @@ const ACTIVITIES: Activity[] = [
     title: "Music Therapy",
     description: "Soothing music to calm your mind",
     icon: "musical-notes",
-    colors: ["#667eea", "#764ba2"],
+    colors: ["#667eea", "#764ba2"] as const,
     route: "/music-therapy",
     category: "therapy",
   },
@@ -53,7 +53,7 @@ const ACTIVITIES: Activity[] = [
     title: "Story Time",
     description: "Heartwarming stories to brighten your day",
     icon: "book",
-    colors: ["#f093fb", "#f5576c"],
+    colors: ["#f093fb", "#f5576c"] as const,
     route: "/storytelling",
     category: "therapy",
   },
@@ -62,7 +62,7 @@ const ACTIVITIES: Activity[] = [
     title: "Community Chat",
     description: "Connect with friends and share",
     icon: "people",
-    colors: ["#fa709a", "#fee140"],
+    colors: ["#fa709a", "#fee140"] as const,
     route: "/(tabs)/community",
     category: "social",
   },

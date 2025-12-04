@@ -17,7 +17,7 @@ interface StoryTheme {
   title: string
   description: string
   icon: any
-  colors: string[]
+  colors: readonly [string, string, ...string[]]
 }
 
 const STORY_THEMES: StoryTheme[] = [
@@ -26,42 +26,42 @@ const STORY_THEMES: StoryTheme[] = [
     title: "Friendship",
     description: "Heartwarming tales of companionship",
     icon: "people",
-    colors: ["#667eea", "#764ba2"],
+    colors: ["#667eea", "#764ba2"] as const,
   },
   {
     id: "nature",
     title: "Nature",
     description: "Beautiful stories from the natural world",
     icon: "leaf",
-    colors: ["#43e97b", "#38f9d7"],
+    colors: ["#43e97b", "#38f9d7"] as const,
   },
   {
     id: "family",
     title: "Family",
     description: "Touching stories about family bonds",
     icon: "home",
-    colors: ["#f093fb", "#f5576c"],
+    colors: ["#f093fb", "#f5576c"] as const,
   },
   {
     id: "wisdom",
     title: "Wisdom",
     description: "Inspiring tales of life lessons",
     icon: "bulb",
-    colors: ["#4facfe", "#00f2fe"],
+    colors: ["#4facfe", "#00f2fe"] as const,
   },
   {
     id: "adventure",
     title: "Adventure",
     description: "Gentle adventures and discoveries",
     icon: "compass",
-    colors: ["#fa709a", "#fee140"],
+    colors: ["#fa709a", "#fee140"] as const,
   },
   {
     id: "kindness",
     title: "Kindness",
     description: "Stories of compassion and care",
     icon: "heart",
-    colors: ["#ff6b9d", "#c06c84"],
+    colors: ["#ff6b9d", "#c06c84"] as const,
   },
 ]
 

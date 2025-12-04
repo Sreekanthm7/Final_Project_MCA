@@ -18,7 +18,7 @@ export default function BreathingScreen() {
   const [scale] = useState(new Animated.Value(1))
 
   useEffect(() => {
-    let interval: NodeJS.Timeout
+    let interval: ReturnType<typeof setInterval>
 
     if (isActive) {
       interval = setInterval(() => {
@@ -61,7 +61,7 @@ export default function BreathingScreen() {
         }).start()
       }
     }
-  }, [phase, isActive])
+  }, [phase, isActive, scale])
 
   const toggleExercise = () => {
     if (!isActive) {
@@ -85,11 +85,11 @@ export default function BreathingScreen() {
   const getPhaseColor = () => {
     switch (phase) {
       case "inhale":
-        return ["#4facfe", "#00f2fe"]
+        return ["#4facfe", "#00f2fe"] as const
       case "hold":
-        return ["#43e97b", "#38f9d7"]
+        return ["#43e97b", "#38f9d7"] as const
       case "exhale":
-        return ["#667eea", "#764ba2"]
+        return ["#667eea", "#764ba2"] as const
     }
   }
 

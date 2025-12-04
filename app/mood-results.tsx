@@ -49,11 +49,11 @@ export default function MoodResultsScreen() {
   const getMoodColor = () => {
     switch (analysis.mood) {
       case "happy":
-        return ["#43e97b", "#38f9d7"]
+        return ["#43e97b", "#38f9d7"] as const
       case "sad":
-        return ["#f5576c", "#f093fb"]
+        return ["#f5576c", "#f093fb"] as const
       default:
-        return ["#4facfe", "#00f2fe"]
+        return ["#4facfe", "#00f2fe"] as const
     }
   }
 
@@ -153,7 +153,7 @@ export default function MoodResultsScreen() {
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
-              <Ionicons name="wind" size={40} color="#fff" />
+              <Ionicons name="fitness" size={40} color="#fff" />
               <View style={styles.recommendationContent}>
                 <Text style={styles.recommendationTitle}>
                   Breathing Exercise

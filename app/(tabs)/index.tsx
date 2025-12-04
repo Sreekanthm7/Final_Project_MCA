@@ -76,7 +76,10 @@ export default function HomeScreen() {
             <Text style={styles.greeting}>{getGreeting()},</Text>
             <Text style={styles.userName}>{userName}!</Text>
           </View>
-          <TouchableOpacity style={styles.profileButton}>
+          <TouchableOpacity
+            style={styles.profileButton}
+            onPress={() => router.push("/profile" as any)}
+          >
             <Ionicons name="person-circle" size={50} color="#fff" />
           </TouchableOpacity>
         </View>

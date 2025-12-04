@@ -3,7 +3,7 @@ import React, { useState } from "react"
 import { Alert, Text, TextInput, TouchableOpacity, View, KeyboardAvoidingView, Platform, ScrollView } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
-import { styles } from "./styles"
+import { styles } from "./_styles"
 
 export default function LoginScreen() {
   const router = useRouter()
@@ -18,8 +18,8 @@ export default function LoginScreen() {
       return
     }
     // You can integrate your backend API or Firebase here
-    Alert.alert("Login Successful", `Welcome ${email}`)
-    router.replace("/(tabs)")
+    // After successful authentication, redirect to user selection
+    router.replace("/user-selection" as any)
   }
 
   return (
@@ -104,31 +104,13 @@ export default function LoginScreen() {
                 </LinearGradient>
               </TouchableOpacity>
 
-              {/* Divider */}
-              <View style={styles.dividerContainer}>
-                <View style={styles.divider} />
-                <Text style={styles.dividerText}>OR</Text>
-                <View style={styles.divider} />
-              </View>
-
-              {/* Social Login Buttons */}
-              <View style={styles.socialContainer}>
-                <TouchableOpacity style={styles.socialButton}>
-                  <Ionicons name="logo-google" size={24} color="#DB4437" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.socialButton}>
-                  <Ionicons name="logo-apple" size={24} color="#000" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.socialButton}>
-                  <Ionicons name="logo-facebook" size={24} color="#4267B2" />
-                </TouchableOpacity>
-              </View>
-
               {/* Sign Up Link */}
               <View style={styles.footer}>
                 <Text style={styles.footerText}>
                   Don&apos;t have an account?{" "}
-                  <Text style={styles.link}>Sign Up</Text>
+                  <Text style={styles.link} onPress={() => router.push("/signup-selection" as any)}>
+                    Sign Up
+                  </Text>
                 </Text>
               </View>
             </View>
