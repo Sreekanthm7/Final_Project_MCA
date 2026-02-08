@@ -1,25 +1,63 @@
 import { useRouter } from "expo-router"
 import React, { useState } from "react"
-import { Alert, Text, TextInput, TouchableOpacity, View, KeyboardAvoidingView, Platform, ScrollView } from "react-native"
+import { Alert, Text, TextInput, TouchableOpacity, View, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
-import { styles } from "./_styles"
+import { styles } from "../constants/LoginStyles"
+import { loginUser } from "../api/auth"
+import { useUser } from "../contexts/UserContext"
 
 export default function LoginScreen() {
   const router = useRouter()
+  const { setUserType, setCurrentUser } = useUser()
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!email || !password) {
       Alert.alert("Error", "Please enter both email and password")
       return
     }
-    // You can integrate your backend API or Firebase here
-    // After successful authentication, redirect to user selection
-    router.replace("/user-selection" as any)
+
+    setIsLoading(true)
+
+    try {
+      // Call the login API
+      const result = await loginUser({ email, password })
+
+      if (result.success && result.user) {
+        // Update user context
+        await setUserType(result.user.userType)
+        await setCurrentUser({
+          id: result.user.id,
+          name: result.user.name,
+          email: result.user.email,
+          userType: result.user.userType,
+          token: result.user.token
+        })
+
+        // Navigate based on user type
+        if (result.user.userType === "elderly") {
+          router.replace("/(tabs)" as any)
+        } else if (result.user.userType === "caretaker") {
+          router.replace("/caretaker-dashboard" as any)
+        } else {
+          router.replace("/user-selection" as any)
+        }
+
+        Alert.alert("Success", "Welcome back!")
+      } else {
+        Alert.alert("Login Failed", result.error || "Invalid credentials")
+      }
+    } catch (error) {
+      console.error("Login error:", error)
+      Alert.alert("Error", "An unexpected error occurred. Please try again.")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -92,15 +130,25 @@ export default function LoginScreen() {
               </TouchableOpacity>
 
               {/* Login Button */}
-              <TouchableOpacity style={styles.button} onPress={handleLogin}>
+              <TouchableOpacity
+                style={styles.button}
+                onPress={handleLogin}
+                disabled={isLoading}
+              >
                 <LinearGradient
                   colors={["#667eea", "#764ba2"]}
                   style={styles.buttonGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                 >
-                  <Text style={styles.buttonText}>Sign In</Text>
-                  <Ionicons name="arrow-forward" size={20} color="#fff" style={styles.buttonIcon} />
+                  {isLoading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Text style={styles.buttonText}>Sign In</Text>
+                      <Ionicons name="arrow-forward" size={20} color="#fff" style={styles.buttonIcon} />
+                    </>
+                  )}
                 </LinearGradient>
               </TouchableOpacity>
 

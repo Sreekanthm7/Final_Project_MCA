@@ -20,7 +20,7 @@ export default function ProfileScreen() {
   const [isEditing, setIsEditing] = useState(false)
 
   // User profile data
-  const [name, setName] = useState("John Doe")
+  const [name, setName] = useState("")
   const [email, setEmail] = useState("john.doe@example.com")
   const [age, setAge] = useState("75")
   const [phone, setPhone] = useState("+1 234 567 8900")
@@ -38,7 +38,9 @@ export default function ProfileScreen() {
       const savedEmail = await AsyncStorage.getItem("userEmail")
       const savedAge = await AsyncStorage.getItem("userAge")
       const savedPhone = await AsyncStorage.getItem("userPhone")
-      const savedEmergencyContact = await AsyncStorage.getItem("emergencyContact")
+      const savedEmergencyContact = await AsyncStorage.getItem(
+        "emergencyContact"
+      )
       const savedEmergencyPhone = await AsyncStorage.getItem("emergencyPhone")
       const savedAddress = await AsyncStorage.getItem("userAddress")
 
@@ -53,6 +55,8 @@ export default function ProfileScreen() {
       console.error("Error loading profile data:", error)
     }
   }
+
+  console.log(name, "dataaaa")
 
   const saveProfileData = async () => {
     try {
@@ -73,24 +77,20 @@ export default function ProfileScreen() {
   }
 
   const handleLogout = () => {
-    Alert.alert(
-      "Logout",
-      "Are you sure you want to logout?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel"
+    Alert.alert("Logout", "Are you sure you want to logout?", [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          await logout()
+          router.replace("/Login" as any)
         },
-        {
-          text: "Logout",
-          style: "destructive",
-          onPress: async () => {
-            await logout()
-            router.replace("/user-selection" as any)
-          }
-        }
-      ]
-    )
+      },
+    ])
   }
 
   const getInitials = () => {
@@ -110,15 +110,22 @@ export default function ProfileScreen() {
         end={{ x: 1, y: 1 }}
       >
         <View style={styles.headerTop}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Profile</Text>
           <TouchableOpacity
-            onPress={() => isEditing ? saveProfileData() : setIsEditing(true)}
+            onPress={() => (isEditing ? saveProfileData() : setIsEditing(true))}
             style={styles.editButton}
           >
-            <Ionicons name={isEditing ? "checkmark" : "create"} size={24} color="#fff" />
+            <Ionicons
+              name={isEditing ? "checkmark" : "create"}
+              size={24}
+              color="#fff"
+            />
           </TouchableOpacity>
         </View>
 

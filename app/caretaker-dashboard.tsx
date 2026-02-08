@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import {
   ScrollView,
   StyleSheet,
@@ -6,20 +6,69 @@ import {
   TouchableOpacity,
   View,
   TextInput,
+  ActivityIndicator,
+  Alert,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
 import { useRouter } from "expo-router"
 import { useUser, ElderlyUser } from "../contexts/UserContext"
+import { fetchCaretakerDashboard } from "../api/caretaker"
 
 export default function CaretakerDashboard() {
   const router = useRouter()
   const { currentUser, logout } = useUser()
   const [searchQuery, setSearchQuery] = useState("")
+  const [elderlyUsers, setElderlyUsers] = useState<ElderlyUser[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    loadDashboardData()
+  }, [])
+
+  const loadDashboardData = async () => {
+    try {
+      setIsLoading(true)
+
+      console.log("Fetching caretaker dashboard data...")
+      const result = await fetchCaretakerDashboard()
+      console.log("Dashboard result:", JSON.stringify(result, null, 2))
+
+      if (result.success && result.data) {
+        console.log("Elderly users found:", result.data.elderlyUsers?.length || 0)
+        setElderlyUsers(result.data.elderlyUsers || [])
+      } else {
+        console.error("Dashboard error:", result.error)
+        Alert.alert("Error", result.error || "Failed to load dashboard data")
+      }
+    } catch (err) {
+      console.error("Dashboard exception:", err)
+      const errorMsg = err instanceof Error ? err.message : "An error occurred"
+      Alert.alert("Error", errorMsg)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const handleLogout = async () => {
-    await logout()
-    router.replace("/user-selection" as any)
+    Alert.alert(
+      "Logout",
+      "Are you sure you want to logout?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Logout",
+          style: "destructive",
+          onPress: async () => {
+            await logout()
+            router.replace("/Login" as any)
+          }
+        }
+      ]
+    )
   }
 
   const getMoodIcon = (mood?: "happy" | "sad" | "neutral") => {
@@ -61,23 +110,30 @@ export default function CaretakerDashboard() {
     }
   }
 
-  const filteredUsers =
-    currentUser?.elderlyUsers.filter((user) =>
-      user.name.toLowerCase().includes(searchQuery.toLowerCase())
-    ) || []
+  const filteredUsers = elderlyUsers.filter((user) =>
+    user.name.toLowerCase().includes(searchQuery.toLowerCase())
+  )
 
   const getStatistics = () => {
-    const users = currentUser?.elderlyUsers || []
     return {
-      total: users.length,
-      good: users.filter((u) => u.healthStatus === "good").length,
-      needsAttention: users.filter((u) => u.healthStatus === "needs-attention")
-        .length,
-      activeToday: users.filter((u) => u.lastActive.includes("hours") || u.lastActive.includes("minutes")).length,
+      total: elderlyUsers.length,
+      good: elderlyUsers.filter((u) => u.healthStatus === "good").length,
+      needsAttention: elderlyUsers.filter((u) => u.healthStatus === "needs-attention").length,
+      activeToday: elderlyUsers.filter((u) => u.lastActive.includes("hours") || u.lastActive.includes("minutes")).length,
     }
   }
 
   const stats = getStatistics()
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#43e97b" />
+        <Text style={styles.loadingText}>Loading dashboard...</Text>
+      </View>
+    )
+  }
 
   return (
     <View style={styles.container}>
@@ -393,5 +449,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#999",
     marginTop: 15,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f8f9fa",
+  },
+  loadingText: {
+    marginTop: 15,
+    fontSize: 16,
+    color: "#666",
   },
 })

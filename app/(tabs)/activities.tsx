@@ -27,7 +27,7 @@ const ACTIVITIES: Activity[] = [
     description: "Deep breathing techniques for relaxation",
     icon: "fitness",
     colors: ["#4facfe", "#00f2fe"] as const,
-    route: "/breathing",
+    route: "../../breathing",
     category: "wellness",
   },
   {
@@ -36,7 +36,7 @@ const ACTIVITIES: Activity[] = [
     description: "Simple yoga poses for flexibility",
     icon: "body",
     colors: ["#43e97b", "#38f9d7"] as const,
-    route: "/yoga",
+    route: "../../yoga",
     category: "wellness",
   },
   {
@@ -45,7 +45,7 @@ const ACTIVITIES: Activity[] = [
     description: "Soothing music to calm your mind",
     icon: "musical-notes",
     colors: ["#667eea", "#764ba2"] as const,
-    route: "/music-therapy",
+    route: "../../music-therapy",
     category: "therapy",
   },
   {
@@ -54,7 +54,7 @@ const ACTIVITIES: Activity[] = [
     description: "Heartwarming stories to brighten your day",
     icon: "book",
     colors: ["#f093fb", "#f5576c"] as const,
-    route: "/storytelling",
+    route: "../../storytelling",
     category: "therapy",
   },
   {
@@ -63,7 +63,7 @@ const ACTIVITIES: Activity[] = [
     description: "Connect with friends and share",
     icon: "people",
     colors: ["#fa709a", "#fee140"] as const,
-    route: "/(tabs)/community",
+    route: "./community",
     category: "social",
   },
 ]

@@ -78,7 +78,7 @@ export default function SignupSelectionScreen() {
               Already have an account?{" "}
               <Text
                 style={styles.link}
-                onPress={() => router.replace("/Login/index" as any)}
+                onPress={() => router.replace("/Login" as any)}
               >
                 Sign In
               </Text>

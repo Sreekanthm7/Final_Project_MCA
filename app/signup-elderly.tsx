@@ -9,14 +9,17 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  ActivityIndicator,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
 import { useRouter } from "expo-router"
-import AsyncStorage from "@react-native-async-storage/async-storage"
+import { signupElderly } from "../api/auth"
+import { useUser } from "../contexts/UserContext"
 
 export default function SignupElderlyScreen() {
   const router = useRouter()
+  const { setUserType, setCurrentUser } = useUser()
 
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
@@ -24,9 +27,46 @@ export default function SignupElderlyScreen() {
   const [password, setPassword] = useState("")
   const [age, setAge] = useState("")
   const [address, setAddress] = useState("")
-  const [caretakerId, setCaretakerId] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+
+  // Emergency contact state
+  const [emergencyContactName, setEmergencyContactName] = useState("")
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState("")
+  const [emergencyContactRelation, setEmergencyContactRelation] = useState("")
+
+  // Caretaker selection state
+  const [caretakers, setCaretakers] = useState<any[]>([])
+  const [selectedCaretakerId, setSelectedCaretakerId] = useState<string>("")
+  const [isLoadingCaretakers, setIsLoadingCaretakers] = useState(false)
+
+  // Fetch caretakers on component mount
+  const fetchCaretakers = async () => {
+    setIsLoadingCaretakers(true)
+    try {
+      const API_URL =
+        process.env.EXPO_PUBLIC_API_URL || "http://localhost:5000/api"
+      const response = await fetch(`${API_URL}/users/caretakers`)
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setCaretakers(data.data.caretakers || [])
+      }
+    } catch (error) {
+      console.error("Error fetching caretakers:", error)
+      Alert.alert(
+        "Connection Error",
+        "Unable to connect to the server. Please make sure the backend server is running.\n\nTo start the backend:\n1. Open a terminal\n2. Navigate to ElderlyCareAppBackend\n3. Run: npm start",
+        [{ text: "OK" }]
+      )
+    } finally {
+      setIsLoadingCaretakers(false)
+    }
+  }
+
+  React.useEffect(() => {
+    fetchCaretakers()
+  }, [])
 
   const validateForm = () => {
     if (!name || !email || !phone || !password || !age || !address) {
@@ -34,8 +74,22 @@ export default function SignupElderlyScreen() {
       return false
     }
 
+    if (
+      !emergencyContactName ||
+      !emergencyContactPhone ||
+      !emergencyContactRelation
+    ) {
+      Alert.alert("Error", "Please fill in emergency contact information")
+      return false
+    }
+
+    if (!selectedCaretakerId) {
+      Alert.alert("Error", "Please select a caretaker")
+      return false
+    }
+
     if (password.length < 6) {
-      Alert.alert("Error", "Password must be at least 6 characters long")
+      Alert.alert("Error", "Password must be at least 6 characters")
       return false
     }
 
@@ -46,8 +100,14 @@ export default function SignupElderlyScreen() {
     }
 
     const ageNum = parseInt(age)
-    if (isNaN(ageNum) || ageNum < 18 || ageNum > 120) {
-      Alert.alert("Error", "Please enter a valid age")
+    if (isNaN(ageNum) || ageNum < 60 || ageNum > 120) {
+      Alert.alert("Error", "Age must be between 60 and 120")
+      return false
+    }
+
+    const phoneRegex = /^[0-9]{10}$/
+    if (!phoneRegex.test(phone) || !phoneRegex.test(emergencyContactPhone)) {
+      Alert.alert("Error", "Please enter valid 10-digit phone numbers")
       return false
     }
 
@@ -60,28 +120,56 @@ export default function SignupElderlyScreen() {
     setIsLoading(true)
 
     try {
-      // Here you would integrate with your backend API
-      // For now, we'll just save to AsyncStorage and navigate
+      const result = await signupElderly({
+        name,
+        email,
+        phone,
+        password,
+        age: parseInt(age),
+        address,
+        caretakerId: selectedCaretakerId,
+        emergencyContact: {
+          name: emergencyContactName,
+          phone: emergencyContactPhone,
+          relation: emergencyContactRelation,
+        },
+      })
 
-      await AsyncStorage.setItem("userName", name)
-      await AsyncStorage.setItem("userEmail", email)
-      await AsyncStorage.setItem("userPhone", phone)
-      await AsyncStorage.setItem("userAge", age)
-      await AsyncStorage.setItem("userAddress", address)
+      if (result.success && result.user) {
+        await setUserType(result.user.userType)
+        await setCurrentUser({
+          id: result.user.id,
+          name: result.user.name,
+          email: result.user.email,
+          userType: result.user.userType,
+          token: result.user.token,
+        })
 
-      Alert.alert(
-        "Success",
-        "Account created successfully!",
-        [
+        Alert.alert("Success", "Account created successfully!", [
           {
             text: "OK",
-            onPress: () => router.replace("/user-selection" as any),
+            onPress: () => router.replace("/(tabs)" as any),
           },
-        ]
-      )
+        ])
+      } else {
+        let errorMessage = result.error || "Failed to create account"
+
+        if (errorMessage.includes("already exists")) {
+          errorMessage = "An account with this email already exists."
+        } else if (errorMessage.includes("Caretaker not found")) {
+          errorMessage =
+            "Selected caretaker is unavailable. Please choose another."
+          fetchCaretakers()
+        }
+
+        Alert.alert("Signup Failed", errorMessage)
+      }
     } catch (error) {
       console.error("Signup error:", error)
-      Alert.alert("Error", "Failed to create account. Please try again.")
+      Alert.alert(
+        "Error",
+        "Network error. Please check your connection and try again."
+      )
     } finally {
       setIsLoading(false)
     }
@@ -239,26 +327,140 @@ export default function SignupElderlyScreen() {
                 />
               </View>
 
-              {/* Caretaker ID Input (Optional) */}
+              {/* Emergency Contact Section */}
               <View style={styles.inputContainer}>
                 <Ionicons
-                  name="medical-outline"
+                  name="person-add-outline"
                   size={20}
                   color="#667eea"
                   style={styles.inputIcon}
                 />
                 <TextInput
                   style={styles.input}
-                  placeholder="Caretaker ID (Optional)"
+                  placeholder="Emergency Contact Name *"
                   placeholderTextColor="#999"
-                  value={caretakerId}
-                  onChangeText={setCaretakerId}
+                  value={emergencyContactName}
+                  onChangeText={setEmergencyContactName}
+                  autoCapitalize="words"
                 />
               </View>
 
-              <Text style={styles.helperText}>
-                * Required fields
-              </Text>
+              <View style={styles.inputContainer}>
+                <Ionicons
+                  name="call"
+                  size={20}
+                  color="#667eea"
+                  style={styles.inputIcon}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Emergency Contact Phone *"
+                  placeholderTextColor="#999"
+                  value={emergencyContactPhone}
+                  onChangeText={setEmergencyContactPhone}
+                  keyboardType="phone-pad"
+                />
+              </View>
+
+              <View style={styles.inputContainer}>
+                <Ionicons
+                  name="people-outline"
+                  size={20}
+                  color="#667eea"
+                  style={styles.inputIcon}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Relation (e.g., Son, Daughter) *"
+                  placeholderTextColor="#999"
+                  value={emergencyContactRelation}
+                  onChangeText={setEmergencyContactRelation}
+                  autoCapitalize="words"
+                />
+              </View>
+
+              {/* Caretaker Selection */}
+              {isLoadingCaretakers ? (
+                <View
+                  style={[styles.inputContainer, { justifyContent: "center" }]}
+                >
+                  <ActivityIndicator size="small" color="#667eea" />
+                  <Text style={{ marginLeft: 10, color: "#666" }}>
+                    Loading caretakers...
+                  </Text>
+                </View>
+              ) : caretakers.length > 0 ? (
+                <View style={{ marginBottom: 15 }}>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      color: "#666",
+                      marginBottom: 10,
+                      fontWeight: "bold",
+                    }}
+                  >
+                    Select Caretaker *
+                  </Text>
+                  {caretakers.map((caretaker) => (
+                    <TouchableOpacity
+                      key={caretaker._id}
+                      style={{
+                        padding: 15,
+                        backgroundColor:
+                          selectedCaretakerId === caretaker._id
+                            ? "#e8f0fe"
+                            : "#f8f9fa",
+                        borderRadius: 15,
+                        marginBottom: 10,
+                        borderWidth:
+                          selectedCaretakerId === caretaker._id ? 2 : 0,
+                        borderColor: "#667eea",
+                        flexDirection: "row",
+                        alignItems: "center",
+                      }}
+                      onPress={() => setSelectedCaretakerId(caretaker._id)}
+                    >
+                      <Ionicons
+                        name="medical-outline"
+                        size={24}
+                        color={
+                          selectedCaretakerId === caretaker._id
+                            ? "#667eea"
+                            : "#999"
+                        }
+                        style={{ marginRight: 12 }}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={{
+                            fontSize: 16,
+                            fontWeight: "bold",
+                            color: "#333",
+                          }}
+                        >
+                          {caretaker.name}
+                        </Text>
+                        <Text style={{ fontSize: 14, color: "#666" }}>
+                          Experience: {caretaker.experience} years
+                        </Text>
+                      </View>
+                      {selectedCaretakerId === caretaker._id && (
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={24}
+                          color="#667eea"
+                        />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <Text style={{ fontSize: 14, color: "#999", marginBottom: 15 }}>
+                  No caretakers available. Please contact support.
+                </Text>
+              )}
+
+              <Text style={styles.helperText}>* Required fields</Text>
 
               {/* Signup Button */}
               <TouchableOpacity
@@ -292,7 +494,7 @@ export default function SignupElderlyScreen() {
                   Already have an account?{" "}
                   <Text
                     style={styles.link}
-                    onPress={() => router.replace("/Login/index" as any)}
+                    onPress={() => router.replace("/Login" as any)}
                   >
                     Sign In
                   </Text>

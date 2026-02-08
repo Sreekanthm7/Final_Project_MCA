@@ -13,9 +13,12 @@ import {
 import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
 import { useRouter } from "expo-router"
+import { signupCaretaker } from "../api/auth"
+import { useUser } from "../contexts/UserContext"
 
 export default function SignupCaretakerScreen() {
   const router = useRouter()
+  const { setUserType, setCurrentUser } = useUser()
 
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
@@ -57,22 +60,48 @@ export default function SignupCaretakerScreen() {
     setIsLoading(true)
 
     try {
-      // Here you would integrate with your backend API
-      // For now, we'll just show success message and navigate
+      const result = await signupCaretaker({
+        name,
+        email,
+        phone,
+        password,
+        experience: parseInt(experience)
+      })
 
-      Alert.alert(
-        "Success",
-        "Caretaker account created successfully!",
-        [
-          {
-            text: "OK",
-            onPress: () => router.replace("/user-selection" as any),
-          },
-        ]
-      )
+      if (result.success && result.user) {
+        await setUserType(result.user.userType)
+        await setCurrentUser({
+          id: result.user.id,
+          name: result.user.name,
+          email: result.user.email,
+          userType: result.user.userType,
+          token: result.user.token
+        })
+
+        Alert.alert(
+          "Success",
+          "Caretaker account created successfully!",
+          [
+            {
+              text: "OK",
+              onPress: () => router.replace("/caretaker-dashboard" as any),
+            },
+          ]
+        )
+      } else {
+        const errorMessage = result.error?.includes("already exists")
+        
+          ? "An account with this email already exists. Please login instead."
+          : result.error || "Failed to create account"
+
+        Alert.alert("Signup Failed", errorMessage)
+      }
     } catch (error) {
       console.error("Signup error:", error)
-      Alert.alert("Error", "Failed to create account. Please try again.")
+      Alert.alert(
+        "Error",
+        "Network error. Please check your connection and try again."
+      )
     } finally {
       setIsLoading(false)
     }
@@ -259,7 +288,7 @@ export default function SignupCaretakerScreen() {
                   Already have an account?{" "}
                   <Text
                     style={styles.link}
-                    onPress={() => router.replace("/Login/index" as any)}
+                    onPress={() => router.replace("/Login" as any)}
                   >
                     Sign In
                   </Text>

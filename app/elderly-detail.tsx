@@ -1,29 +1,129 @@
-import React from "react"
+import React, { useState, useEffect } from "react"
 import {
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
+  ActivityIndicator,
+  Alert,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
 import { useLocalSearchParams, useRouter } from "expo-router"
-import { useUser } from "../contexts/UserContext"
+import { ElderlyUser } from "../contexts/UserContext"
+import AsyncStorage from "@react-native-async-storage/async-storage"
+import { API_CONFIG } from "../api/config"
 
 export default function ElderlyDetailScreen() {
   const router = useRouter()
   const params = useLocalSearchParams()
-  const { currentUser } = useUser()
+  const [elderlyUser, setElderlyUser] = useState<ElderlyUser | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
-  const elderlyUser = currentUser?.elderlyUsers.find(
-    (user) => user.id === params.userId
-  )
+  useEffect(() => {
+    fetchElderlyUser()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.userId])
+
+  const fetchElderlyUser = async () => {
+    try {
+      setIsLoading(true)
+      const token = await AsyncStorage.getItem("authToken")
+
+      if (!token) {
+        Alert.alert("Error", "Not authenticated")
+        router.back()
+        return
+      }
+
+      console.log("Fetching elderly user:", params.userId)
+
+      const response = await fetch(
+        `${API_CONFIG.BASE_URL}/users/${params.userId}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
+
+      const data = await response.json()
+      console.log("Elderly user data:", data)
+
+      if (response.ok && data.success) {
+        const user = data.data.user
+        setElderlyUser({
+          id: user._id || user.id,
+          name: user.name,
+          age: user.age,
+          healthStatus: user.healthStatus || "good",
+          currentMood: user.currentMood || "neutral",
+          lastActive: getLastActiveString(user.lastActive),
+          recentActivities: user.recentActivities || [],
+          moodHistory: user.moodHistory || [],
+          vitalSigns: user.vitalSigns,
+        })
+      } else {
+        Alert.alert("Error", data.message || "Failed to load user data")
+        router.back()
+      }
+    } catch (error) {
+      console.error("Fetch elderly user error:", error)
+      Alert.alert("Error", "Failed to load user data")
+      router.back()
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const getLastActiveString = (lastActiveDate: any) => {
+    if (!lastActiveDate) {
+      return "Never"
+    }
+
+    const now = new Date()
+    const lastActive = new Date(lastActiveDate)
+    const diffInMs = now.getTime() - lastActive.getTime()
+    const diffInMinutes = Math.floor(diffInMs / (1000 * 60))
+    const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60))
+    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24))
+
+    if (diffInMinutes < 1) {
+      return "Just now"
+    } else if (diffInMinutes < 60) {
+      return `${diffInMinutes} minute${diffInMinutes > 1 ? "s" : ""} ago`
+    } else if (diffInHours < 24) {
+      return `${diffInHours} hour${diffInHours > 1 ? "s" : ""} ago`
+    } else if (diffInDays < 7) {
+      return `${diffInDays} day${diffInDays > 1 ? "s" : ""} ago`
+    } else {
+      return lastActive.toLocaleDateString()
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color="#43e97b" />
+        <Text style={styles.loadingText}>Loading user details...</Text>
+      </View>
+    )
+  }
 
   if (!elderlyUser) {
     return (
-      <View style={styles.container}>
-        <Text>User not found</Text>
+      <View style={[styles.container, styles.centerContent]}>
+        <Ionicons name="alert-circle" size={60} color="#999" />
+        <Text style={styles.errorText}>User not found</Text>
+        <TouchableOpacity
+          style={styles.backToListButton}
+          onPress={() => router.back()}
+        >
+          <Text style={styles.backToListText}>Go Back</Text>
+        </TouchableOpacity>
       </View>
     )
   }
@@ -496,6 +596,32 @@ const styles = StyleSheet.create({
   actionButtonText: {
     color: "#fff",
     fontSize: 18,
+    fontWeight: "bold",
+  },
+  centerContent: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 15,
+    fontSize: 16,
+    color: "#666",
+  },
+  errorText: {
+    marginTop: 15,
+    fontSize: 18,
+    color: "#999",
+    marginBottom: 20,
+  },
+  backToListButton: {
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    backgroundColor: "#43e97b",
+    borderRadius: 25,
+  },
+  backToListText: {
+    color: "#fff",
+    fontSize: 16,
     fontWeight: "bold",
   },
 })
