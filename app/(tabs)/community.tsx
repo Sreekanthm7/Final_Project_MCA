@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react"
+import React, { useState, useRef, useEffect, useCallback } from "react"
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -8,83 +8,212 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  ActivityIndicator,
+  Alert,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
+import AsyncStorage from "@react-native-async-storage/async-storage"
 
 interface ChatMessage {
-  id: string
-  userName: string
-  message: string
-  timestamp: string
-  userId: string
+  _id: string
+  text: string
+  senderId: string
+  senderName: string
+  createdAt: string
 }
 
-// Mock messages for demonstration
-const INITIAL_MESSAGES: ChatMessage[] = [
-  {
-    id: "1",
-    userName: "Mary",
-    message: "Good morning everyone! How is everyone doing today?",
-    timestamp: "9:30 AM",
-    userId: "user1",
-  },
-  {
-    id: "2",
-    userName: "John",
-    message: "Morning Mary! Feeling great today. Just finished my morning walk!",
-    timestamp: "9:35 AM",
-    userId: "user2",
-  },
-  {
-    id: "3",
-    userName: "Sarah",
-    message: "Hello friends! The weather is beautiful today.",
-    timestamp: "9:42 AM",
-    userId: "user3",
-  },
-  {
-    id: "4",
-    userName: "Robert",
-    message: "Anyone interested in joining a virtual book club?",
-    timestamp: "10:15 AM",
-    userId: "user4",
-  },
-]
+const POLL_INTERVAL = 4000 // Poll every 4 seconds
 
 export default function CommunityScreen() {
   const flatListRef = useRef<FlatList>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES)
-  const [input, setInput] = useState("")
-  const [onlineCount] = useState(12)
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastFetchTimeRef = useRef<string | null>(null)
 
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [input, setInput] = useState("")
+  const [currentUserId, setCurrentUserId] = useState<string>("")
+  const [currentUserName, setCurrentUserName] = useState<string>("")
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSending, setIsSending] = useState(false)
+  const [onlineCount, setOnlineCount] = useState(0)
+
+  const getApiUrl = () =>
+    process.env.EXPO_PUBLIC_API_URL || "http://localhost:5000/api"
+
+  const getAuthHeaders = async () => {
+    const token = await AsyncStorage.getItem("authToken")
+    return {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    }
+  }
+
+  // Load current user info
   useEffect(() => {
-    // Auto scroll to bottom when new messages arrive
+    const loadUser = async () => {
+      const userId = await AsyncStorage.getItem("userId")
+      const storedUser = await AsyncStorage.getItem("currentUser")
+      if (userId) setCurrentUserId(userId)
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser)
+          setCurrentUserName(user.name || "")
+        } catch {}
+      }
+    }
+    loadUser()
+  }, [])
+
+  // Fetch all messages on mount
+  const fetchAllMessages = useCallback(async () => {
+    try {
+      const headers = await getAuthHeaders()
+      const response = await fetch(`${getApiUrl()}/chat/messages`, { headers })
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setMessages(data.data.messages)
+        if (data.data.messages.length > 0) {
+          lastFetchTimeRef.current =
+            data.data.messages[data.data.messages.length - 1].createdAt
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching messages:", error)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  // Poll for new messages
+  const pollNewMessages = useCallback(async () => {
+    try {
+      const headers = await getAuthHeaders()
+      const sinceParam = lastFetchTimeRef.current
+        ? `?since=${encodeURIComponent(lastFetchTimeRef.current)}`
+        : ""
+      const response = await fetch(
+        `${getApiUrl()}/chat/messages${sinceParam}`,
+        { headers }
+      )
+      const data = await response.json()
+
+      if (response.ok && data.success && data.data.messages.length > 0) {
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m._id))
+          const newMsgs = data.data.messages.filter(
+            (m: ChatMessage) => !existingIds.has(m._id)
+          )
+          if (newMsgs.length === 0) return prev
+          return [...prev, ...newMsgs]
+        })
+        lastFetchTimeRef.current =
+          data.data.messages[data.data.messages.length - 1].createdAt
+      }
+    } catch (error) {
+      // Silent fail for polling
+    }
+  }, [])
+
+  // Fetch online count
+  const fetchOnlineCount = useCallback(async () => {
+    try {
+      const headers = await getAuthHeaders()
+      const response = await fetch(`${getApiUrl()}/chat/online-count`, {
+        headers,
+      })
+      const data = await response.json()
+      if (response.ok && data.success) {
+        setOnlineCount(data.data.onlineCount)
+      }
+    } catch {}
+  }, [])
+
+  // Initial fetch + start polling
+  useEffect(() => {
+    fetchAllMessages()
+    fetchOnlineCount()
+
+    pollTimerRef.current = setInterval(() => {
+      pollNewMessages()
+      fetchOnlineCount()
+    }, POLL_INTERVAL)
+
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Auto-scroll when messages change
+  useEffect(() => {
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true })
-    }, 100)
+    }, 150)
   }, [messages])
 
-  const sendMessage = () => {
-    if (input.trim() === "") return
+  const sendMessage = async () => {
+    if (input.trim() === "" || isSending) return
 
-    const newMessage: ChatMessage = {
-      id: Date.now().toString(),
-      userName: "You",
-      message: input,
-      timestamp: new Date().toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-      }),
-      userId: "currentUser",
-    }
-
-    setMessages((prev) => [...prev, newMessage])
+    const messageText = input.trim()
     setInput("")
+    setIsSending(true)
+
+    // Optimistic update
+    const optimisticMsg: ChatMessage = {
+      _id: `temp_${Date.now()}`,
+      text: messageText,
+      senderId: currentUserId,
+      senderName: currentUserName,
+      createdAt: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, optimisticMsg])
+
+    try {
+      const headers = await getAuthHeaders()
+      const response = await fetch(`${getApiUrl()}/chat/messages`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text: messageText }),
+      })
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        // Replace optimistic message with real one
+        setMessages((prev) =>
+          prev.map((m) =>
+            m._id === optimisticMsg._id ? data.data.message : m
+          )
+        )
+        lastFetchTimeRef.current = data.data.message.createdAt
+      } else {
+        // Remove optimistic message on failure
+        setMessages((prev) =>
+          prev.filter((m) => m._id !== optimisticMsg._id)
+        )
+        Alert.alert("Error", data.message || "Failed to send message")
+      }
+    } catch (error) {
+      setMessages((prev) =>
+        prev.filter((m) => m._id !== optimisticMsg._id)
+      )
+      Alert.alert("Error", "Failed to send message. Check your connection.")
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const formatTime = (isoString: string) => {
+    const date = new Date(isoString)
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    })
   }
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
-    const isCurrentUser = item.userId === "currentUser"
+    const isCurrentUser = item.senderId === currentUserId
 
     return (
       <View
@@ -96,7 +225,7 @@ export default function CommunityScreen() {
         {!isCurrentUser && (
           <View style={styles.avatarCircle}>
             <Text style={styles.avatarText}>
-              {item.userName.charAt(0).toUpperCase()}
+              {item.senderName.charAt(0).toUpperCase()}
             </Text>
           </View>
         )}
@@ -108,7 +237,7 @@ export default function CommunityScreen() {
           ]}
         >
           {!isCurrentUser && (
-            <Text style={styles.userName}>{item.userName}</Text>
+            <Text style={styles.userName}>{item.senderName}</Text>
           )}
           <Text
             style={[
@@ -116,7 +245,7 @@ export default function CommunityScreen() {
               isCurrentUser && styles.currentUserText,
             ]}
           >
-            {item.message}
+            {item.text}
           </Text>
           <Text
             style={[
@@ -124,15 +253,36 @@ export default function CommunityScreen() {
               isCurrentUser && styles.currentUserTimestamp,
             ]}
           >
-            {item.timestamp}
+            {formatTime(item.createdAt)}
           </Text>
         </View>
 
         {isCurrentUser && (
           <View style={[styles.avatarCircle, styles.currentUserAvatar]}>
-            <Ionicons name="person" size={20} color="#fff" />
+            <Text style={styles.avatarText}>
+              {currentUserName.charAt(0).toUpperCase()}
+            </Text>
           </View>
         )}
+      </View>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <LinearGradient
+          colors={["#f093fb", "#f5576c"]}
+          style={styles.header}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <Text style={styles.headerTitle}>Community Chat</Text>
+        </LinearGradient>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#f5576c" />
+          <Text style={styles.loadingText}>Loading chat...</Text>
+        </View>
       </View>
     )
   }
@@ -148,14 +298,16 @@ export default function CommunityScreen() {
         <Text style={styles.headerTitle}>Community Chat</Text>
         <View style={styles.onlineStatus}>
           <View style={styles.onlineDot} />
-          <Text style={styles.onlineText}>{onlineCount} members online</Text>
+          <Text style={styles.onlineText}>
+            {onlineCount} {onlineCount === 1 ? "member" : "members"} online
+          </Text>
         </View>
       </LinearGradient>
 
       <View style={styles.welcomeBanner}>
         <Ionicons name="people" size={24} color="#f5576c" />
         <Text style={styles.welcomeText}>
-          Connect with friends and share your thoughts!
+          Connect with fellow members and share your thoughts!
         </Text>
       </View>
 
@@ -164,17 +316,26 @@ export default function CommunityScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
       >
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={renderMessage}
-          contentContainerStyle={styles.messagesList}
-          showsVerticalScrollIndicator={false}
-          onContentSizeChange={() =>
-            flatListRef.current?.scrollToEnd({ animated: true })
-          }
-        />
+        {messages.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="chatbubbles-outline" size={60} color="#ccc" />
+            <Text style={styles.emptyText}>
+              No messages yet. Start the conversation!
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            keyExtractor={(item) => item._id}
+            renderItem={renderMessage}
+            contentContainerStyle={styles.messagesList}
+            showsVerticalScrollIndicator={false}
+            onContentSizeChange={() =>
+              flatListRef.current?.scrollToEnd({ animated: true })
+            }
+          />
+        )}
 
         <View style={styles.inputContainer}>
           <TextInput
@@ -187,15 +348,26 @@ export default function CommunityScreen() {
             maxLength={500}
           />
           <TouchableOpacity
-            style={[styles.sendButton, !input.trim() && styles.sendButtonDisabled]}
+            style={[
+              styles.sendButton,
+              (!input.trim() || isSending) && styles.sendButtonDisabled,
+            ]}
             onPress={sendMessage}
-            disabled={!input.trim()}
+            disabled={!input.trim() || isSending}
           >
             <LinearGradient
-              colors={input.trim() ? ["#f093fb", "#f5576c"] : ["#ccc", "#ccc"]}
+              colors={
+                input.trim() && !isSending
+                  ? ["#f093fb", "#f5576c"]
+                  : ["#ccc", "#ccc"]
+              }
               style={styles.sendButtonGradient}
             >
-              <Ionicons name="send" size={24} color="#fff" />
+              {isSending ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="send" size={24} color="#fff" />
+              )}
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -367,5 +539,27 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     alignItems: "center",
     justifyContent: "center",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: "#666",
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 40,
+  },
+  emptyText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: "#999",
+    textAlign: "center",
   },
 })

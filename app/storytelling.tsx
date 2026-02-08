@@ -10,7 +10,7 @@ import {
 import { Ionicons } from "@expo/vector-icons"
 import { useRouter } from "expo-router"
 import { LinearGradient } from "expo-linear-gradient"
-import { generateStory } from "../services/openai"
+import { generateStory } from "../services/claude"
 
 interface StoryTheme {
   id: string

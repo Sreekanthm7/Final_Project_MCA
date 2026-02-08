@@ -7,6 +7,7 @@ import {
   View,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
@@ -14,74 +15,154 @@ import { useRouter } from "expo-router"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { useUser } from "../contexts/UserContext"
 
+interface UserProfile {
+  _id: string
+  name: string
+  email: string
+  phone: string
+  role: "elderly" | "caretaker"
+  age?: number
+  address?: string
+  emergencyContact?: {
+    name: string
+    phone: string
+    relation: string
+  }
+  experience?: number
+  specialization?: string
+  healthStatus?: string
+  currentMood?: string
+  caretakerId?: {
+    name: string
+    email: string
+    phone: string
+  }
+}
+
 export default function ProfileScreen() {
   const router = useRouter()
   const { logout } = useUser()
   const [isEditing, setIsEditing] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [profile, setProfile] = useState<UserProfile | null>(null)
 
-  // User profile data
+  // Editable fields
   const [name, setName] = useState("")
-  const [email, setEmail] = useState("john.doe@example.com")
-  const [age, setAge] = useState("75")
-  const [phone, setPhone] = useState("+1 234 567 8900")
-  const [emergencyContact, setEmergencyContact] = useState("Jane Doe")
-  const [emergencyPhone, setEmergencyPhone] = useState("+1 234 567 8901")
-  const [address, setAddress] = useState("123 Main St, City, State")
+  const [phone, setPhone] = useState("")
+  const [age, setAge] = useState("")
+  const [address, setAddress] = useState("")
+  const [emergencyContactName, setEmergencyContactName] = useState("")
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState("")
+  const [emergencyContactRelation, setEmergencyContactRelation] = useState("")
+  const [experience, setExperience] = useState("")
+  const [specialization, setSpecialization] = useState("")
 
   useEffect(() => {
-    loadProfileData()
+    fetchProfile()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const loadProfileData = async () => {
+  const fetchProfile = async () => {
+    setIsLoading(true)
     try {
-      const savedName = await AsyncStorage.getItem("userName")
-      const savedEmail = await AsyncStorage.getItem("userEmail")
-      const savedAge = await AsyncStorage.getItem("userAge")
-      const savedPhone = await AsyncStorage.getItem("userPhone")
-      const savedEmergencyContact = await AsyncStorage.getItem(
-        "emergencyContact"
-      )
-      const savedEmergencyPhone = await AsyncStorage.getItem("emergencyPhone")
-      const savedAddress = await AsyncStorage.getItem("userAddress")
+      const token = await AsyncStorage.getItem("authToken")
+      if (!token) {
+        Alert.alert("Session Expired", "Please login again.")
+        router.replace("/Login" as any)
+        return
+      }
 
-      if (savedName) setName(savedName)
-      if (savedEmail) setEmail(savedEmail)
-      if (savedAge) setAge(savedAge)
-      if (savedPhone) setPhone(savedPhone)
-      if (savedEmergencyContact) setEmergencyContact(savedEmergencyContact)
-      if (savedEmergencyPhone) setEmergencyPhone(savedEmergencyPhone)
-      if (savedAddress) setAddress(savedAddress)
+      const API_URL =
+        process.env.EXPO_PUBLIC_API_URL || "http://localhost:5000/api"
+      const response = await fetch(`${API_URL}/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      })
+
+      const data = await response.json()
+
+      if (response.ok && data.success && data.data?.user) {
+        const user = data.data.user
+        setProfile(user)
+        setName(user.name || "")
+        setPhone(user.phone || "")
+        setAge(user.age?.toString() || "")
+        setAddress(user.address || "")
+        setEmergencyContactName(user.emergencyContact?.name || "")
+        setEmergencyContactPhone(user.emergencyContact?.phone || "")
+        setEmergencyContactRelation(user.emergencyContact?.relation || "")
+        setExperience(user.experience?.toString() || "")
+        setSpecialization(user.specialization || "")
+      } else {
+        Alert.alert("Error", "Failed to load profile data")
+      }
     } catch (error) {
-      console.error("Error loading profile data:", error)
+      console.error("Error fetching profile:", error)
+      Alert.alert("Error", "Unable to connect to the server")
+    } finally {
+      setIsLoading(false)
     }
   }
 
-  console.log(name, "dataaaa")
-
-  const saveProfileData = async () => {
+  const saveProfile = async () => {
+    setIsSaving(true)
     try {
-      await AsyncStorage.setItem("userName", name)
-      await AsyncStorage.setItem("userEmail", email)
-      await AsyncStorage.setItem("userAge", age)
-      await AsyncStorage.setItem("userPhone", phone)
-      await AsyncStorage.setItem("emergencyContact", emergencyContact)
-      await AsyncStorage.setItem("emergencyPhone", emergencyPhone)
-      await AsyncStorage.setItem("userAddress", address)
+      const token = await AsyncStorage.getItem("authToken")
+      if (!token || !profile) return
 
-      setIsEditing(false)
-      Alert.alert("Success", "Profile updated successfully!")
+      const API_URL =
+        process.env.EXPO_PUBLIC_API_URL || "http://localhost:5000/api"
+
+      const updates: any = { name, phone }
+
+      if (profile.role === "elderly") {
+        updates.age = parseInt(age)
+        updates.address = address
+        updates.emergencyContact = {
+          name: emergencyContactName,
+          phone: emergencyContactPhone,
+          relation: emergencyContactRelation,
+        }
+      } else {
+        updates.experience = parseInt(experience)
+        updates.specialization = specialization
+      }
+
+      const response = await fetch(`${API_URL}/users/${profile._id}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(updates),
+      })
+
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setIsEditing(false)
+        Alert.alert("Success", "Profile updated successfully!")
+        fetchProfile()
+      } else {
+        Alert.alert(
+          "Error",
+          data.message || "Failed to update profile"
+        )
+      }
     } catch (error) {
-      console.error("Error saving profile data:", error)
+      console.error("Error saving profile:", error)
       Alert.alert("Error", "Failed to save profile data")
+    } finally {
+      setIsSaving(false)
     }
   }
 
   const handleLogout = () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
-      {
-        text: "Cancel",
-        style: "cancel",
-      },
+      { text: "Cancel", style: "cancel" },
       {
         text: "Logout",
         style: "destructive",
@@ -94,11 +175,40 @@ export default function ProfileScreen() {
   }
 
   const getInitials = () => {
+    if (!name) return "?"
     const names = name.split(" ")
     if (names.length >= 2) {
-      return names[0][0] + names[1][0]
+      return (names[0][0] + names[1][0]).toUpperCase()
     }
     return name.substring(0, 2).toUpperCase()
+  }
+
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <LinearGradient
+          colors={["#667eea", "#764ba2"]}
+          style={styles.header}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <View style={styles.headerTop}>
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.backButton}
+            >
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Profile</Text>
+            <View style={{ width: 44 }} />
+          </View>
+        </LinearGradient>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#667eea" />
+          <Text style={styles.loadingText}>Loading profile...</Text>
+        </View>
+      </View>
+    )
   }
 
   return (
@@ -118,18 +228,22 @@ export default function ProfileScreen() {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Profile</Text>
           <TouchableOpacity
-            onPress={() => (isEditing ? saveProfileData() : setIsEditing(true))}
+            onPress={() => (isEditing ? saveProfile() : setIsEditing(true))}
             style={styles.editButton}
+            disabled={isSaving}
           >
-            <Ionicons
-              name={isEditing ? "checkmark" : "create"}
-              size={24}
-              color="#fff"
-            />
+            {isSaving ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons
+                name={isEditing ? "checkmark" : "create"}
+                size={24}
+                color="#fff"
+              />
+            )}
           </TouchableOpacity>
         </View>
 
-        {/* Gravatar/Avatar */}
         <View style={styles.avatarSection}>
           <View style={styles.avatarContainer}>
             <LinearGradient
@@ -142,7 +256,17 @@ export default function ProfileScreen() {
             </LinearGradient>
           </View>
           <Text style={styles.profileName}>{name}</Text>
-          <Text style={styles.profileEmail}>{email}</Text>
+          <Text style={styles.profileEmail}>{profile?.email}</Text>
+          <View style={styles.roleBadge}>
+            <Ionicons
+              name={profile?.role === "caretaker" ? "medical" : "person"}
+              size={14}
+              color="#fff"
+            />
+            <Text style={styles.roleBadgeText}>
+              {profile?.role === "caretaker" ? "Caretaker" : "Elderly User"}
+            </Text>
+          </View>
         </View>
       </LinearGradient>
 
@@ -179,37 +303,7 @@ export default function ProfileScreen() {
               <Ionicons name="mail" size={20} color="#667eea" />
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Email</Text>
-                {isEditing ? (
-                  <TextInput
-                    style={styles.infoInput}
-                    value={email}
-                    onChangeText={setEmail}
-                    placeholder="Enter your email"
-                    keyboardType="email-address"
-                  />
-                ) : (
-                  <Text style={styles.infoValue}>{email}</Text>
-                )}
-              </View>
-            </View>
-
-            <View style={styles.divider} />
-
-            <View style={styles.infoRow}>
-              <Ionicons name="calendar" size={20} color="#667eea" />
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Age</Text>
-                {isEditing ? (
-                  <TextInput
-                    style={styles.infoInput}
-                    value={age}
-                    onChangeText={setAge}
-                    placeholder="Enter your age"
-                    keyboardType="numeric"
-                  />
-                ) : (
-                  <Text style={styles.infoValue}>{age} years</Text>
-                )}
+                <Text style={styles.infoValue}>{profile?.email}</Text>
               </View>
             </View>
 
@@ -233,100 +327,210 @@ export default function ProfileScreen() {
               </View>
             </View>
 
-            <View style={styles.divider} />
+            {/* Elderly-specific fields */}
+            {profile?.role === "elderly" && (
+              <>
+                <View style={styles.divider} />
+                <View style={styles.infoRow}>
+                  <Ionicons name="calendar" size={20} color="#667eea" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Age</Text>
+                    {isEditing ? (
+                      <TextInput
+                        style={styles.infoInput}
+                        value={age}
+                        onChangeText={setAge}
+                        placeholder="Enter your age"
+                        keyboardType="numeric"
+                      />
+                    ) : (
+                      <Text style={styles.infoValue}>{age} years</Text>
+                    )}
+                  </View>
+                </View>
 
-            <View style={styles.infoRow}>
-              <Ionicons name="location" size={20} color="#667eea" />
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Address</Text>
-                {isEditing ? (
-                  <TextInput
-                    style={styles.infoInput}
-                    value={address}
-                    onChangeText={setAddress}
-                    placeholder="Enter your address"
-                    multiline
-                  />
-                ) : (
-                  <Text style={styles.infoValue}>{address}</Text>
-                )}
-              </View>
-            </View>
+                <View style={styles.divider} />
+                <View style={styles.infoRow}>
+                  <Ionicons name="location" size={20} color="#667eea" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Address</Text>
+                    {isEditing ? (
+                      <TextInput
+                        style={styles.infoInput}
+                        value={address}
+                        onChangeText={setAddress}
+                        placeholder="Enter your address"
+                        multiline
+                      />
+                    ) : (
+                      <Text style={styles.infoValue}>{address}</Text>
+                    )}
+                  </View>
+                </View>
+              </>
+            )}
+
+            {/* Caretaker-specific fields */}
+            {profile?.role === "caretaker" && (
+              <>
+                <View style={styles.divider} />
+                <View style={styles.infoRow}>
+                  <Ionicons name="briefcase" size={20} color="#667eea" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Experience</Text>
+                    {isEditing ? (
+                      <TextInput
+                        style={styles.infoInput}
+                        value={experience}
+                        onChangeText={setExperience}
+                        placeholder="Years of experience"
+                        keyboardType="numeric"
+                      />
+                    ) : (
+                      <Text style={styles.infoValue}>
+                        {experience} years
+                      </Text>
+                    )}
+                  </View>
+                </View>
+
+                <View style={styles.divider} />
+                <View style={styles.infoRow}>
+                  <Ionicons name="medkit" size={20} color="#667eea" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Specialization</Text>
+                    {isEditing ? (
+                      <TextInput
+                        style={styles.infoInput}
+                        value={specialization}
+                        onChangeText={setSpecialization}
+                        placeholder="Your specialization"
+                      />
+                    ) : (
+                      <Text style={styles.infoValue}>
+                        {specialization || "Not specified"}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              </>
+            )}
           </View>
         </View>
 
-        {/* Emergency Contact */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Emergency Contact</Text>
+        {/* Emergency Contact - only for elderly */}
+        {profile?.role === "elderly" && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Emergency Contact</Text>
 
-          <View style={styles.infoCard}>
-            <View style={styles.infoRow}>
-              <Ionicons name="people" size={20} color="#f5576c" />
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Contact Name</Text>
-                {isEditing ? (
-                  <TextInput
-                    style={styles.infoInput}
-                    value={emergencyContact}
-                    onChangeText={setEmergencyContact}
-                    placeholder="Enter contact name"
-                  />
-                ) : (
-                  <Text style={styles.infoValue}>{emergencyContact}</Text>
-                )}
+            <View style={styles.infoCard}>
+              <View style={styles.infoRow}>
+                <Ionicons name="people" size={20} color="#f5576c" />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Contact Name</Text>
+                  {isEditing ? (
+                    <TextInput
+                      style={styles.infoInput}
+                      value={emergencyContactName}
+                      onChangeText={setEmergencyContactName}
+                      placeholder="Enter contact name"
+                    />
+                  ) : (
+                    <Text style={styles.infoValue}>
+                      {emergencyContactName || "Not set"}
+                    </Text>
+                  )}
+                </View>
               </View>
-            </View>
 
-            <View style={styles.divider} />
+              <View style={styles.divider} />
 
-            <View style={styles.infoRow}>
-              <Ionicons name="call" size={20} color="#f5576c" />
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Contact Phone</Text>
-                {isEditing ? (
-                  <TextInput
-                    style={styles.infoInput}
-                    value={emergencyPhone}
-                    onChangeText={setEmergencyPhone}
-                    placeholder="Enter contact phone"
-                    keyboardType="phone-pad"
-                  />
-                ) : (
-                  <Text style={styles.infoValue}>{emergencyPhone}</Text>
-                )}
+              <View style={styles.infoRow}>
+                <Ionicons name="call" size={20} color="#f5576c" />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Contact Phone</Text>
+                  {isEditing ? (
+                    <TextInput
+                      style={styles.infoInput}
+                      value={emergencyContactPhone}
+                      onChangeText={setEmergencyContactPhone}
+                      placeholder="Enter contact phone"
+                      keyboardType="phone-pad"
+                    />
+                  ) : (
+                    <Text style={styles.infoValue}>
+                      {emergencyContactPhone || "Not set"}
+                    </Text>
+                  )}
+                </View>
+              </View>
+
+              <View style={styles.divider} />
+
+              <View style={styles.infoRow}>
+                <Ionicons name="heart" size={20} color="#f5576c" />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Relation</Text>
+                  {isEditing ? (
+                    <TextInput
+                      style={styles.infoInput}
+                      value={emergencyContactRelation}
+                      onChangeText={setEmergencyContactRelation}
+                      placeholder="e.g., Son, Daughter"
+                    />
+                  ) : (
+                    <Text style={styles.infoValue}>
+                      {emergencyContactRelation || "Not set"}
+                    </Text>
+                  )}
+                </View>
               </View>
             </View>
           </View>
-        </View>
+        )}
 
-        {/* Account Actions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Account</Text>
+        {/* Assigned Caretaker - only for elderly */}
+        {profile?.role === "elderly" && profile.caretakerId && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Assigned Caretaker</Text>
 
-          <TouchableOpacity style={styles.actionButton}>
-            <View style={styles.actionButtonContent}>
-              <Ionicons name="lock-closed" size={20} color="#667eea" />
-              <Text style={styles.actionButtonText}>Change Password</Text>
-              <Ionicons name="chevron-forward" size={20} color="#ccc" />
+            <View style={styles.infoCard}>
+              <View style={styles.infoRow}>
+                <Ionicons name="medical" size={20} color="#43e97b" />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Caretaker Name</Text>
+                  <Text style={styles.infoValue}>
+                    {profile.caretakerId.name}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.divider} />
+
+              <View style={styles.infoRow}>
+                <Ionicons name="mail" size={20} color="#43e97b" />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Email</Text>
+                  <Text style={styles.infoValue}>
+                    {profile.caretakerId.email}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.divider} />
+
+              <View style={styles.infoRow}>
+                <Ionicons name="call" size={20} color="#43e97b" />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Phone</Text>
+                  <Text style={styles.infoValue}>
+                    {profile.caretakerId.phone}
+                  </Text>
+                </View>
+              </View>
             </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton}>
-            <View style={styles.actionButtonContent}>
-              <Ionicons name="notifications" size={20} color="#667eea" />
-              <Text style={styles.actionButtonText}>Notification Settings</Text>
-              <Ionicons name="chevron-forward" size={20} color="#ccc" />
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton}>
-            <View style={styles.actionButtonContent}>
-              <Ionicons name="shield-checkmark" size={20} color="#667eea" />
-              <Text style={styles.actionButtonText}>Privacy & Security</Text>
-              <Ionicons name="chevron-forward" size={20} color="#ccc" />
-            </View>
-          </TouchableOpacity>
-        </View>
+          </View>
+        )}
 
         {/* Logout Button */}
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -419,6 +623,21 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.9)",
     marginTop: 5,
   },
+  roleBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.25)",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginTop: 10,
+    gap: 6,
+  },
+  roleBadgeText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
+  },
   content: {
     flex: 1,
   },
@@ -476,28 +695,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#f0f0f0",
     marginVertical: 15,
   },
-  actionButton: {
-    backgroundColor: "#fff",
-    borderRadius: 15,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  actionButtonContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 18,
-    gap: 15,
-  },
-  actionButtonText: {
-    flex: 1,
-    fontSize: 16,
-    color: "#333",
-    fontWeight: "500",
-  },
   logoutButton: {
     borderRadius: 15,
     overflow: "hidden",
@@ -519,5 +716,15 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 18,
     fontWeight: "bold",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: "#666",
   },
 })

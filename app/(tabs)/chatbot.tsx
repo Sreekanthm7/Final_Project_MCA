@@ -14,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons"
 import { useRouter } from "expo-router"
 import { LinearGradient } from "expo-linear-gradient"
 import AsyncStorage from "@react-native-async-storage/async-storage"
-import { analyzeMood, MoodAnalysis } from "../../services/openai"
+import { analyzeMood, MoodAnalysis } from "../../services/claude"
 
 interface Message {
   id: string
@@ -22,16 +22,17 @@ interface Message {
   sender: "bot" | "user"
 }
 
-const DAILY_QUESTIONS = [
+interface DailyQuestion {
+  _id: string
+  questionText: string
+  category: string
+}
+
+const FALLBACK_QUESTIONS = [
   "How are you feeling today?",
   "How well did you sleep last night?",
   "Have you eaten your meals today?",
   "Are you experiencing any physical discomfort or pain?",
-  "Have you taken your medications today?",
-  "Have you been able to connect with family or friends today?",
-  "How is your energy level today?",
-  "Are you feeling lonely or sad today?",
-  "Did you do any activities you enjoy today?",
   "Is there anything particular worrying you right now?",
 ]
 
@@ -39,26 +40,81 @@ export default function ChatbotScreen() {
   const router = useRouter()
   const flatListRef = useRef<FlatList>(null)
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      text: "Hello! I'm here to check in on how you're doing today. I'll ask you 10 simple questions about your well-being. Please answer honestly so I can better understand how you're feeling. 😊",
-      sender: "bot",
-    },
-  ])
+  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [questionIndex, setQuestionIndex] = useState(0)
   const [userAnswers, setUserAnswers] = useState<string[]>([])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
+  const [dailyQuestions, setDailyQuestions] = useState<string[]>([])
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(true)
 
   useEffect(() => {
-    // Ask first question after initial greeting
-    setTimeout(() => {
-      askNextQuestion()
-    }, 1500)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetchDailyQuestions()
   }, [])
+
+  const fetchDailyQuestions = async () => {
+    setIsLoadingQuestions(true)
+    try {
+      const API_URL =
+        process.env.EXPO_PUBLIC_API_URL || "http://localhost:5000/api"
+      const response = await fetch(`${API_URL}/questions/daily`)
+      const data = await response.json()
+
+      let questions: string[]
+
+      if (response.ok && data.success && data.data?.questions?.length > 0) {
+        questions = data.data.questions.map(
+          (q: DailyQuestion) => q.questionText
+        )
+      } else {
+        questions = FALLBACK_QUESTIONS
+      }
+
+      setDailyQuestions(questions)
+      setIsLoadingQuestions(false)
+
+      // Show greeting then ask first question
+      setMessages([
+        {
+          id: "1",
+          text: `Hello! I'm here to check in on how you're doing today. I'll ask you ${questions.length} simple questions about your well-being. Please answer honestly so I can better understand how you're feeling. 😊`,
+          sender: "bot",
+        },
+      ])
+
+      setTimeout(() => {
+        const botMessage: Message = {
+          id: Date.now().toString(),
+          text: `Question 1/${questions.length}: ${questions[0]}`,
+          sender: "bot",
+        }
+        setMessages((prev) => [...prev, botMessage])
+      }, 1500)
+    } catch (error) {
+      console.error("Error fetching daily questions:", error)
+      const questions = FALLBACK_QUESTIONS
+      setDailyQuestions(questions)
+      setIsLoadingQuestions(false)
+
+      setMessages([
+        {
+          id: "1",
+          text: `Hello! I'm here to check in on how you're doing today. I'll ask you ${questions.length} simple questions about your well-being. Please answer honestly so I can better understand how you're feeling. 😊`,
+          sender: "bot",
+        },
+      ])
+
+      setTimeout(() => {
+        const botMessage: Message = {
+          id: Date.now().toString(),
+          text: `Question 1/${questions.length}: ${questions[0]}`,
+          sender: "bot",
+        }
+        setMessages((prev) => [...prev, botMessage])
+      }, 1500)
+    }
+  }
 
   useEffect(() => {
     // Auto scroll to bottom when new messages arrive
@@ -68,10 +124,10 @@ export default function ChatbotScreen() {
   }, [messages])
 
   const askNextQuestion = () => {
-    if (questionIndex < DAILY_QUESTIONS.length) {
+    if (questionIndex < dailyQuestions.length) {
       const botMessage: Message = {
         id: Date.now().toString(),
-        text: `Question ${questionIndex + 1}/10: ${DAILY_QUESTIONS[questionIndex]}`,
+        text: `Question ${questionIndex + 1}/${dailyQuestions.length}: ${dailyQuestions[questionIndex]}`,
         sender: "bot",
       }
       setMessages((prev) => [...prev, botMessage])
@@ -173,6 +229,35 @@ export default function ChatbotScreen() {
     </View>
   )
 
+  if (isLoadingQuestions) {
+    return (
+      <View style={styles.container}>
+        <LinearGradient
+          colors={["#667eea", "#764ba2"]}
+          style={styles.header}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+        >
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={28} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.headerTitle}>
+              <Text style={styles.headerText}>Daily Check-In</Text>
+            </View>
+            <View style={{ width: 28 }} />
+          </View>
+        </LinearGradient>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#667eea" />
+          <Text style={styles.loadingText}>
+            Preparing today's questions...
+          </Text>
+        </View>
+      </View>
+    )
+  }
+
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -188,7 +273,7 @@ export default function ChatbotScreen() {
           <View style={styles.headerTitle}>
             <Text style={styles.headerText}>Daily Check-In</Text>
             <Text style={styles.headerSubtext}>
-              {questionIndex}/{DAILY_QUESTIONS.length} questions
+              {questionIndex}/{dailyQuestions.length} questions
             </Text>
           </View>
           <View style={{ width: 28 }} />
@@ -348,5 +433,15 @@ const styles = StyleSheet.create({
   sendButtonDisabled: {
     backgroundColor: "#ccc",
     shadowOpacity: 0,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: "#666",
   },
 })

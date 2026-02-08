@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native"
-import { MoodAnalysis } from "../services/openai"
+import { MoodAnalysis } from "../services/claude"
 
 export default function MoodResultsScreen() {
   const router = useRouter()
