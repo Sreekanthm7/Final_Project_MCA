@@ -7,6 +7,7 @@ import {
   View,
   ActivityIndicator,
   Alert,
+  Dimensions,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { LinearGradient } from "expo-linear-gradient"
@@ -15,16 +16,51 @@ import { ElderlyUser } from "../contexts/UserContext"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { API_CONFIG } from "../api/config"
 
+interface MoodDataPoint {
+  date: string
+  mood: string | null
+  moodScore: number | null
+  emotions: string[]
+  concerns: string[]
+}
+
+interface MoodSummary {
+  totalEntries: number
+  averageScore: number
+  moodCounts: { happy: number; sad: number; neutral: number }
+  predominantMood: string
+}
+
+interface MoodHistoryData {
+  period: string
+  entries: MoodDataPoint[]
+  summary: MoodSummary
+}
+
+const SCREEN_WIDTH = Dimensions.get("window").width
+
 export default function ElderlyDetailScreen() {
   const router = useRouter()
   const params = useLocalSearchParams()
   const [elderlyUser, setElderlyUser] = useState<ElderlyUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [selectedPeriod, setSelectedPeriod] = useState<"weekly" | "monthly">(
+    "weekly"
+  )
+  const [moodHistory, setMoodHistory] = useState<MoodHistoryData | null>(null)
+  const [isMoodLoading, setIsMoodLoading] = useState(false)
 
   useEffect(() => {
     fetchElderlyUser()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.userId])
+
+  useEffect(() => {
+    if (params.userId) {
+      fetchMoodHistory(selectedPeriod)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.userId, selectedPeriod])
 
   const fetchElderlyUser = async () => {
     try {
@@ -36,8 +72,6 @@ export default function ElderlyDetailScreen() {
         router.back()
         return
       }
-
-      console.log("Fetching elderly user:", params.userId)
 
       const response = await fetch(
         `${API_CONFIG.BASE_URL}/users/${params.userId}`,
@@ -51,7 +85,6 @@ export default function ElderlyDetailScreen() {
       )
 
       const data = await response.json()
-      console.log("Elderly user data:", data)
 
       if (response.ok && data.success) {
         const user = data.data.user
@@ -79,10 +112,36 @@ export default function ElderlyDetailScreen() {
     }
   }
 
-  const getLastActiveString = (lastActiveDate: any) => {
-    if (!lastActiveDate) {
-      return "Never"
+  const fetchMoodHistory = async (period: "weekly" | "monthly") => {
+    try {
+      setIsMoodLoading(true)
+      const token = await AsyncStorage.getItem("authToken")
+
+      const response = await fetch(
+        `${API_CONFIG.BASE_URL}/mood/history/${params.userId}?period=${period}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
+
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setMoodHistory(data.data)
+      }
+    } catch (error) {
+      console.error("Error fetching mood history:", error)
+    } finally {
+      setIsMoodLoading(false)
     }
+  }
+
+  const getLastActiveString = (lastActiveDate: any) => {
+    if (!lastActiveDate) return "Never"
 
     const now = new Date()
     const lastActive = new Date(lastActiveDate)
@@ -91,17 +150,326 @@ export default function ElderlyDetailScreen() {
     const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60))
     const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24))
 
-    if (diffInMinutes < 1) {
-      return "Just now"
-    } else if (diffInMinutes < 60) {
+    if (diffInMinutes < 1) return "Just now"
+    if (diffInMinutes < 60)
       return `${diffInMinutes} minute${diffInMinutes > 1 ? "s" : ""} ago`
-    } else if (diffInHours < 24) {
+    if (diffInHours < 24)
       return `${diffInHours} hour${diffInHours > 1 ? "s" : ""} ago`
-    } else if (diffInDays < 7) {
+    if (diffInDays < 7)
       return `${diffInDays} day${diffInDays > 1 ? "s" : ""} ago`
-    } else {
-      return lastActive.toLocaleDateString()
+    return lastActive.toLocaleDateString()
+  }
+
+  const getMoodColor = (mood?: "happy" | "sad" | "neutral" | string) => {
+    switch (mood) {
+      case "happy":
+        return ["#43e97b", "#38f9d7"] as const
+      case "sad":
+        return ["#f5576c", "#f093fb"] as const
+      case "neutral":
+        return ["#4facfe", "#00f2fe"] as const
+      default:
+        return ["#999", "#666"] as const
     }
+  }
+
+  const getMoodIcon = (mood?: "happy" | "sad" | "neutral" | string) => {
+    switch (mood) {
+      case "happy":
+        return "happy"
+      case "sad":
+        return "sad"
+      case "neutral":
+        return "remove-circle"
+      default:
+        return "help-circle"
+    }
+  }
+
+  const getBarColor = (mood: string | null) => {
+    switch (mood) {
+      case "happy":
+        return "#43e97b"
+      case "sad":
+        return "#f5576c"
+      case "neutral":
+        return "#4facfe"
+      default:
+        return "#e0e0e0"
+    }
+  }
+
+  const getScoreBarColor = (score: number | null) => {
+    if (!score) return "#e0e0e0"
+    if (score >= 7) return "#43e97b"
+    if (score >= 4) return "#4facfe"
+    return "#f5576c"
+  }
+
+  const formatDateLabel = (dateStr: string, period: string) => {
+    const date = new Date(dateStr)
+    if (period === "monthly") {
+      return `${date.getDate()}/${date.getMonth() + 1}`
+    }
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    return days[date.getDay()]
+  }
+
+  const renderMoodBarChart = () => {
+    if (!moodHistory || moodHistory.entries.length === 0) {
+      return (
+        <View style={styles.emptyChart}>
+          <Ionicons name="analytics-outline" size={48} color="#ccc" />
+          <Text style={styles.emptyChartText}>
+            No mood data available yet
+          </Text>
+        </View>
+      )
+    }
+
+    const entries = moodHistory.entries
+    const chartWidth = SCREEN_WIDTH - 80
+    const barWidth =
+      selectedPeriod === "weekly"
+        ? Math.min(30, chartWidth / entries.length - 8)
+        : Math.min(14, chartWidth / entries.length - 2)
+    const maxBarHeight = 120
+
+    return (
+      <View>
+        {/* Score Chart */}
+        <Text style={styles.chartSubTitle}>Mood Score Trend</Text>
+        <View style={styles.chartContainer}>
+          <View style={styles.yAxisLabels}>
+            <Text style={styles.yLabel}>10</Text>
+            <Text style={styles.yLabel}>5</Text>
+            <Text style={styles.yLabel}>0</Text>
+          </View>
+          <View style={styles.chartArea}>
+            {/* Grid lines */}
+            <View style={[styles.gridLine, { bottom: maxBarHeight }]} />
+            <View style={[styles.gridLine, { bottom: maxBarHeight / 2 }]} />
+            <View style={[styles.gridLine, { bottom: 0 }]} />
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.barsContainer}
+            >
+              {entries.map((entry, index) => {
+                const barHeight = entry.moodScore
+                  ? (entry.moodScore / 10) * maxBarHeight
+                  : 4
+                return (
+                  <View key={index} style={styles.barWrapper}>
+                    <View
+                      style={{
+                        height: maxBarHeight,
+                        justifyContent: "flex-end",
+                        alignItems: "center",
+                      }}
+                    >
+                      {entry.moodScore && (
+                        <Text style={styles.barValue}>{entry.moodScore}</Text>
+                      )}
+                      <View
+                        style={[
+                          styles.bar,
+                          {
+                            height: barHeight,
+                            width: barWidth,
+                            backgroundColor: getScoreBarColor(entry.moodScore),
+                            borderRadius: barWidth / 2,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.barLabel,
+                        selectedPeriod === "monthly" && styles.barLabelSmall,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {formatDateLabel(entry.date, selectedPeriod)}
+                    </Text>
+                  </View>
+                )
+              })}
+            </ScrollView>
+          </View>
+        </View>
+
+        {/* Mood Type Chart */}
+        <Text style={[styles.chartSubTitle, { marginTop: 25 }]}>
+          Daily Mood
+        </Text>
+        <View style={styles.moodDotsContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.dotsScrollContent}
+          >
+            {entries.map((entry, index) => (
+              <View key={index} style={styles.moodDotWrapper}>
+                <View
+                  style={[
+                    styles.moodDot,
+                    { backgroundColor: getBarColor(entry.mood) },
+                  ]}
+                >
+                  {entry.mood && (
+                    <Ionicons
+                      name={
+                        getMoodIcon(entry.mood) as keyof typeof Ionicons.glyphMap
+                      }
+                      size={selectedPeriod === "monthly" ? 14 : 18}
+                      color="#fff"
+                    />
+                  )}
+                </View>
+                <Text
+                  style={[
+                    styles.dotLabel,
+                    selectedPeriod === "monthly" && styles.dotLabelSmall,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {formatDateLabel(entry.date, selectedPeriod)}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* Legend */}
+        <View style={styles.legend}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: "#43e97b" }]} />
+            <Text style={styles.legendText}>Happy</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: "#4facfe" }]} />
+            <Text style={styles.legendText}>Neutral</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: "#f5576c" }]} />
+            <Text style={styles.legendText}>Sad</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: "#e0e0e0" }]} />
+            <Text style={styles.legendText}>No Data</Text>
+          </View>
+        </View>
+      </View>
+    )
+  }
+
+  const renderMoodSummary = () => {
+    if (!moodHistory || !moodHistory.summary) return null
+
+    const { summary } = moodHistory
+
+    return (
+      <View style={styles.summaryContainer}>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryNumber}>{summary.totalEntries}</Text>
+          <Text style={styles.summaryLabel}>Check-ins</Text>
+        </View>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryNumber}>
+            {summary.averageScore || "-"}
+          </Text>
+          <Text style={styles.summaryLabel}>Avg Score</Text>
+        </View>
+        <View style={styles.summaryCard}>
+          <Ionicons
+            name={
+              getMoodIcon(summary.predominantMood) as keyof typeof Ionicons.glyphMap
+            }
+            size={24}
+            color={getMoodColor(summary.predominantMood)[0]}
+          />
+          <Text style={styles.summaryLabel}>
+            {summary.predominantMood !== "none"
+              ? summary.predominantMood.charAt(0).toUpperCase() +
+                summary.predominantMood.slice(1)
+              : "-"}
+          </Text>
+        </View>
+      </View>
+    )
+  }
+
+  const renderMoodDistribution = () => {
+    if (!moodHistory || moodHistory.summary.totalEntries === 0) return null
+
+    const { moodCounts } = moodHistory.summary
+    const total = moodCounts.happy + moodCounts.sad + moodCounts.neutral
+    if (total === 0) return null
+
+    const happyPct = Math.round((moodCounts.happy / total) * 100)
+    const neutralPct = Math.round((moodCounts.neutral / total) * 100)
+    const sadPct = Math.round((moodCounts.sad / total) * 100)
+
+    return (
+      <View style={styles.distributionContainer}>
+        <Text style={styles.chartSubTitle}>Mood Distribution</Text>
+        <View style={styles.distributionBar}>
+          {happyPct > 0 && (
+            <View
+              style={[
+                styles.distributionSegment,
+                {
+                  flex: happyPct,
+                  backgroundColor: "#43e97b",
+                  borderTopLeftRadius: 8,
+                  borderBottomLeftRadius: 8,
+                },
+              ]}
+            />
+          )}
+          {neutralPct > 0 && (
+            <View
+              style={[
+                styles.distributionSegment,
+                { flex: neutralPct, backgroundColor: "#4facfe" },
+              ]}
+            />
+          )}
+          {sadPct > 0 && (
+            <View
+              style={[
+                styles.distributionSegment,
+                {
+                  flex: sadPct,
+                  backgroundColor: "#f5576c",
+                  borderTopRightRadius: 8,
+                  borderBottomRightRadius: 8,
+                },
+              ]}
+            />
+          )}
+        </View>
+        <View style={styles.distributionLabels}>
+          {happyPct > 0 && (
+            <Text style={[styles.distributionLabel, { color: "#43e97b" }]}>
+              Happy {happyPct}%
+            </Text>
+          )}
+          {neutralPct > 0 && (
+            <Text style={[styles.distributionLabel, { color: "#4facfe" }]}>
+              Neutral {neutralPct}%
+            </Text>
+          )}
+          {sadPct > 0 && (
+            <Text style={[styles.distributionLabel, { color: "#f5576c" }]}>
+              Sad {sadPct}%
+            </Text>
+          )}
+        </View>
+      </View>
+    )
   }
 
   if (isLoading) {
@@ -128,58 +496,6 @@ export default function ElderlyDetailScreen() {
     )
   }
 
-  const getMoodColor = (mood?: "happy" | "sad" | "neutral") => {
-    switch (mood) {
-      case "happy":
-        return ["#43e97b", "#38f9d7"] as const
-      case "sad":
-        return ["#f5576c", "#f093fb"] as const
-      case "neutral":
-        return ["#4facfe", "#00f2fe"] as const
-      default:
-        return ["#999", "#666"] as const
-    }
-  }
-
-  const getMoodIcon = (mood?: "happy" | "sad" | "neutral") => {
-    switch (mood) {
-      case "happy":
-        return "happy"
-      case "sad":
-        return "sad"
-      case "neutral":
-        return "remove-circle"
-      default:
-        return "help-circle"
-    }
-  }
-
-  const getHealthStatusIcon = (status: string) => {
-    switch (status) {
-      case "good":
-        return "checkmark-circle"
-      case "fair":
-        return "alert-circle"
-      case "needs-attention":
-        return "warning"
-      default:
-        return "help-circle"
-    }
-  }
-
-  const getHealthStatusColor = (status: string) => {
-    switch (status) {
-      case "good":
-        return "#43e97b"
-      case "fair":
-        return "#fee140"
-      case "needs-attention":
-        return "#f5576c"
-      default:
-        return "#999"
-    }
-  }
-
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -189,7 +505,10 @@ export default function ElderlyDetailScreen() {
         end={{ x: 1, y: 1 }}
       >
         <View style={styles.headerTop}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>User Details</Text>
@@ -204,7 +523,9 @@ export default function ElderlyDetailScreen() {
           <Text style={styles.profileAge}>{elderlyUser.age} years old</Text>
           <View style={styles.lastActiveContainer}>
             <Ionicons name="time" size={16} color="rgba(255,255,255,0.9)" />
-            <Text style={styles.lastActive}>Last active: {elderlyUser.lastActive}</Text>
+            <Text style={styles.lastActive}>
+              Last active: {elderlyUser.lastActive}
+            </Text>
           </View>
         </View>
       </LinearGradient>
@@ -213,11 +534,14 @@ export default function ElderlyDetailScreen() {
         {/* Current Status */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Current Status</Text>
-
           <View style={styles.statusGrid}>
             <View style={styles.statusCard}>
               <Ionicons
-                name={getMoodIcon(elderlyUser.currentMood)}
+                name={
+                  getMoodIcon(
+                    elderlyUser.currentMood
+                  ) as keyof typeof Ionicons.glyphMap
+                }
                 size={40}
                 color={getMoodColor(elderlyUser.currentMood)[0]}
               />
@@ -229,9 +553,25 @@ export default function ElderlyDetailScreen() {
 
             <View style={styles.statusCard}>
               <Ionicons
-                name={getHealthStatusIcon(elderlyUser.healthStatus)}
+                name={
+                  elderlyUser.healthStatus === "good"
+                    ? "checkmark-circle"
+                    : elderlyUser.healthStatus === "fair"
+                      ? "alert-circle"
+                      : elderlyUser.healthStatus === "needs-attention"
+                        ? "warning"
+                        : "help-circle"
+                }
                 size={40}
-                color={getHealthStatusColor(elderlyUser.healthStatus)}
+                color={
+                  elderlyUser.healthStatus === "good"
+                    ? "#43e97b"
+                    : elderlyUser.healthStatus === "fair"
+                      ? "#fee140"
+                      : elderlyUser.healthStatus === "needs-attention"
+                        ? "#f5576c"
+                        : "#999"
+                }
               />
               <Text style={styles.statusLabel}>Health</Text>
               <Text style={styles.statusValue}>
@@ -241,6 +581,65 @@ export default function ElderlyDetailScreen() {
               </Text>
             </View>
           </View>
+        </View>
+
+        {/* Mood Graphs Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Mood Analysis</Text>
+
+          {/* Period Toggle */}
+          <View style={styles.periodToggle}>
+            <TouchableOpacity
+              style={[
+                styles.periodButton,
+                selectedPeriod === "weekly" && styles.periodButtonActive,
+              ]}
+              onPress={() => setSelectedPeriod("weekly")}
+            >
+              <Text
+                style={[
+                  styles.periodButtonText,
+                  selectedPeriod === "weekly" && styles.periodButtonTextActive,
+                ]}
+              >
+                Weekly
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.periodButton,
+                selectedPeriod === "monthly" && styles.periodButtonActive,
+              ]}
+              onPress={() => setSelectedPeriod("monthly")}
+            >
+              <Text
+                style={[
+                  styles.periodButtonText,
+                  selectedPeriod === "monthly" && styles.periodButtonTextActive,
+                ]}
+              >
+                Monthly
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Summary Cards */}
+          {renderMoodSummary()}
+
+          {/* Charts */}
+          <View style={styles.chartCard}>
+            {isMoodLoading ? (
+              <View style={styles.chartLoading}>
+                <ActivityIndicator size="small" color="#667eea" />
+                <Text style={styles.chartLoadingText}>Loading chart...</Text>
+              </View>
+            ) : (
+              renderMoodBarChart()
+            )}
+          </View>
+
+          {/* Mood Distribution */}
+          {!isMoodLoading && renderMoodDistribution()}
         </View>
 
         {/* Vital Signs */}
@@ -287,60 +686,6 @@ export default function ElderlyDetailScreen() {
                   </View>
                 </View>
               </View>
-            </View>
-          </View>
-        )}
-
-        {/* Recent Activities */}
-        {elderlyUser.recentActivities && elderlyUser.recentActivities.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Recent Activities</Text>
-            <View style={styles.activitiesCard}>
-              {elderlyUser.recentActivities.map((activity, index) => (
-                <View key={index}>
-                  <View style={styles.activityItem}>
-                    <Ionicons name="checkmark-circle" size={20} color="#43e97b" />
-                    <Text style={styles.activityText}>{activity}</Text>
-                  </View>
-                  {index < elderlyUser.recentActivities.length - 1 && (
-                    <View style={styles.divider} />
-                  )}
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Mood History */}
-        {elderlyUser.moodHistory && elderlyUser.moodHistory.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Mood History (Last 5 Days)</Text>
-            <View style={styles.moodHistoryCard}>
-              {elderlyUser.moodHistory.map((entry, index) => (
-                <View key={index}>
-                  <View style={styles.moodHistoryItem}>
-                    <View style={styles.moodHistoryLeft}>
-                      <Ionicons
-                        name={getMoodIcon(entry.mood)}
-                        size={28}
-                        color={getMoodColor(entry.mood)[0]}
-                      />
-                      <View style={styles.moodHistoryInfo}>
-                        <Text style={styles.moodHistoryDate}>{entry.date}</Text>
-                        <Text style={styles.moodHistoryMood}>
-                          {entry.mood.charAt(0).toUpperCase() + entry.mood.slice(1)}
-                        </Text>
-                        {entry.notes && (
-                          <Text style={styles.moodHistoryNotes}>{entry.notes}</Text>
-                        )}
-                      </View>
-                    </View>
-                  </View>
-                  {index < elderlyUser.moodHistory.length - 1 && (
-                    <View style={styles.divider} />
-                  )}
-                </View>
-              ))}
             </View>
           </View>
         )}
@@ -480,6 +825,240 @@ const styles = StyleSheet.create({
     marginTop: 5,
     textTransform: "capitalize",
   },
+  // Period Toggle
+  periodToggle: {
+    flexDirection: "row",
+    backgroundColor: "#f0f0f0",
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 15,
+  },
+  periodButton: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderRadius: 10,
+  },
+  periodButtonActive: {
+    backgroundColor: "#667eea",
+    shadowColor: "#667eea",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  periodButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#666",
+  },
+  periodButtonTextActive: {
+    color: "#fff",
+  },
+  // Summary
+  summaryContainer: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 15,
+  },
+  summaryCard: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 15,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  summaryNumber: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  summaryLabel: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 4,
+    textTransform: "capitalize",
+  },
+  // Chart
+  chartCard: {
+    backgroundColor: "#fff",
+    borderRadius: 15,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  chartSubTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#444",
+    marginBottom: 12,
+  },
+  chartContainer: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    height: 160,
+  },
+  yAxisLabels: {
+    width: 25,
+    height: 120,
+    justifyContent: "space-between",
+    marginRight: 8,
+    marginBottom: 20,
+  },
+  yLabel: {
+    fontSize: 11,
+    color: "#999",
+    textAlign: "right",
+  },
+  chartArea: {
+    flex: 1,
+    height: 160,
+    justifyContent: "flex-end",
+  },
+  gridLine: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: "#f0f0f0",
+  },
+  barsContainer: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    paddingHorizontal: 4,
+    gap: 6,
+  },
+  barWrapper: {
+    alignItems: "center",
+  },
+  bar: {
+    minHeight: 4,
+  },
+  barValue: {
+    fontSize: 10,
+    color: "#666",
+    marginBottom: 3,
+    fontWeight: "600",
+  },
+  barLabel: {
+    fontSize: 11,
+    color: "#999",
+    marginTop: 6,
+  },
+  barLabelSmall: {
+    fontSize: 9,
+  },
+  // Mood Dots
+  moodDotsContainer: {
+    marginTop: 5,
+  },
+  dotsScrollContent: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  moodDotWrapper: {
+    alignItems: "center",
+  },
+  moodDot: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dotLabel: {
+    fontSize: 11,
+    color: "#999",
+    marginTop: 4,
+  },
+  dotLabelSmall: {
+    fontSize: 9,
+  },
+  // Legend
+  legend: {
+    flexDirection: "row",
+    justifyContent: "center",
+    flexWrap: "wrap",
+    gap: 15,
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#f0f0f0",
+  },
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  legendText: {
+    fontSize: 12,
+    color: "#666",
+  },
+  // Distribution
+  distributionContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 15,
+    padding: 20,
+    marginTop: 15,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  distributionBar: {
+    flexDirection: "row",
+    height: 16,
+    borderRadius: 8,
+    overflow: "hidden",
+    backgroundColor: "#f0f0f0",
+  },
+  distributionSegment: {
+    height: "100%",
+  },
+  distributionLabels: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    marginTop: 10,
+  },
+  distributionLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  // Chart loading
+  chartLoading: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  chartLoadingText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: "#666",
+  },
+  emptyChart: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  emptyChartText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: "#999",
+  },
+  // Vital Signs
   vitalSignsCard: {
     backgroundColor: "#fff",
     borderRadius: 15,
@@ -516,63 +1095,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#f0f0f0",
     marginVertical: 15,
   },
-  activitiesCard: {
-    backgroundColor: "#fff",
-    borderRadius: 15,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  activityItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 5,
-  },
-  activityText: {
-    fontSize: 16,
-    color: "#333",
-  },
-  moodHistoryCard: {
-    backgroundColor: "#fff",
-    borderRadius: 15,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  moodHistoryItem: {
-    paddingVertical: 5,
-  },
-  moodHistoryLeft: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 15,
-  },
-  moodHistoryInfo: {
-    flex: 1,
-  },
-  moodHistoryDate: {
-    fontSize: 14,
-    color: "#999",
-    marginBottom: 4,
-  },
-  moodHistoryMood: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 4,
-  },
-  moodHistoryNotes: {
-    fontSize: 14,
-    color: "#666",
-    fontStyle: "italic",
-  },
+  // Actions
   actionsSection: {
     marginTop: 25,
     gap: 15,

@@ -15,15 +15,31 @@ import { useRouter } from "expo-router"
 import { useUser, ElderlyUser } from "../contexts/UserContext"
 import { fetchCaretakerDashboard } from "../api/caretaker"
 
+interface MoodAlert {
+  id: string
+  type: string
+  elderlyUser: { id: string; name: string; age: number } | null
+  detectedMood: string
+  riskLevel: string
+  message: string
+  emotionsDetected: string[]
+  isRead: boolean
+  createdAt: string
+}
+
 export default function CaretakerDashboard() {
   const router = useRouter()
   const { currentUser, logout } = useUser()
   const [searchQuery, setSearchQuery] = useState("")
   const [elderlyUsers, setElderlyUsers] = useState<ElderlyUser[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [alerts, setAlerts] = useState<MoodAlert[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [showAlerts, setShowAlerts] = useState(false)
 
   useEffect(() => {
     loadDashboardData()
+    loadAlerts()
   }, [])
 
   const loadDashboardData = async () => {
@@ -48,6 +64,74 @@ export default function CaretakerDashboard() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const loadAlerts = async () => {
+    try {
+      const token = await (await import("@react-native-async-storage/async-storage")).default.getItem("authToken")
+      const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:5000/api"
+
+      const response = await fetch(`${API_URL}/notifications`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setAlerts(data.data.notifications || [])
+        setUnreadCount(data.data.unreadCount || 0)
+      }
+    } catch (error) {
+      console.error("Error loading alerts:", error)
+    }
+  }
+
+  const markAlertAsRead = async (alertId: string) => {
+    try {
+      const token = await (await import("@react-native-async-storage/async-storage")).default.getItem("authToken")
+      const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:5000/api"
+
+      await fetch(`${API_URL}/notifications/${alertId}/read`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      setAlerts((prev) =>
+        prev.map((a) => (a.id === alertId ? { ...a, isRead: true } : a))
+      )
+      setUnreadCount((prev) => Math.max(0, prev - 1))
+    } catch (error) {
+      console.error("Error marking alert as read:", error)
+    }
+  }
+
+  const getRiskColor = (riskLevel: string) => {
+    switch (riskLevel) {
+      case "critical":
+        return "#c62828"
+      case "high":
+        return "#e65100"
+      case "medium":
+        return "#f57f17"
+      default:
+        return "#43a047"
+    }
+  }
+
+  const formatAlertTime = (dateStr: string) => {
+    const date = new Date(dateStr)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMs / 3600000)
+
+    if (diffMins < 1) return "Just now"
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    return date.toLocaleDateString()
   }
 
   const handleLogout = async () => {
@@ -174,6 +258,69 @@ export default function CaretakerDashboard() {
       </LinearGradient>
 
       <View style={styles.content}>
+        {/* Mood Alerts Section */}
+        {alerts.length > 0 && (
+          <View style={styles.alertsSection}>
+            <TouchableOpacity
+              style={styles.alertsHeader}
+              onPress={() => setShowAlerts(!showAlerts)}
+            >
+              <View style={styles.alertsHeaderLeft}>
+                <Ionicons name="notifications" size={22} color="#f5576c" />
+                <Text style={styles.alertsTitle}>Mood Alerts</Text>
+                {unreadCount > 0 && (
+                  <View style={styles.alertBadge}>
+                    <Text style={styles.alertBadgeText}>{unreadCount}</Text>
+                  </View>
+                )}
+              </View>
+              <Ionicons
+                name={showAlerts ? "chevron-up" : "chevron-down"}
+                size={20}
+                color="#666"
+              />
+            </TouchableOpacity>
+
+            {showAlerts &&
+              alerts.slice(0, 10).map((alert) => (
+                <TouchableOpacity
+                  key={alert.id}
+                  style={[
+                    styles.alertCard,
+                    !alert.isRead && styles.alertCardUnread,
+                  ]}
+                  onPress={() => {
+                    if (!alert.isRead) markAlertAsRead(alert.id)
+                    if (alert.elderlyUser) {
+                      router.push({
+                        pathname: "/elderly-detail" as any,
+                        params: { userId: alert.elderlyUser.id },
+                      })
+                    }
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.alertRiskDot,
+                      { backgroundColor: getRiskColor(alert.riskLevel) },
+                    ]}
+                  />
+                  <View style={styles.alertContent}>
+                    <Text style={styles.alertMessage}>{alert.message}</Text>
+                    <View style={styles.alertMeta}>
+                      <Text style={styles.alertMood}>
+                        {alert.detectedMood}
+                      </Text>
+                      <Text style={styles.alertTime}>
+                        {formatAlertTime(alert.createdAt)}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+          </View>
+        )}
+
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={20} color="#999" />
           <TextInput
@@ -460,5 +607,87 @@ const styles = StyleSheet.create({
     marginTop: 15,
     fontSize: 16,
     color: "#666",
+  },
+  alertsSection: {
+    marginBottom: 20,
+  },
+  alertsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    padding: 15,
+    borderRadius: 15,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  alertsHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  alertsTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  alertBadge: {
+    backgroundColor: "#f5576c",
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  alertBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  alertCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    padding: 15,
+    borderRadius: 12,
+    marginTop: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: "#e0e0e0",
+  },
+  alertCardUnread: {
+    backgroundColor: "#fff8f8",
+    borderLeftColor: "#f5576c",
+  },
+  alertRiskDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 12,
+  },
+  alertContent: {
+    flex: 1,
+  },
+  alertMessage: {
+    fontSize: 14,
+    color: "#333",
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  alertMeta: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  alertMood: {
+    fontSize: 12,
+    color: "#f5576c",
+    fontWeight: "600",
+  },
+  alertTime: {
+    fontSize: 12,
+    color: "#999",
   },
 })

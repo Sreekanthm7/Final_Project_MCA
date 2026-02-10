@@ -34,6 +34,7 @@ export default function RootLayout() {
         <Stack.Screen name="storytelling" />
         <Stack.Screen name="breathing" />
         <Stack.Screen name="yoga" />
+        <Stack.Screen name="meditation" />
       </Stack>
     </UserProvider>
   );

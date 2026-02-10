@@ -14,7 +14,6 @@ import { Ionicons } from "@expo/vector-icons"
 import { useRouter } from "expo-router"
 import { LinearGradient } from "expo-linear-gradient"
 import AsyncStorage from "@react-native-async-storage/async-storage"
-import { analyzeMood, MoodAnalysis } from "../../services/claude"
 
 interface Message {
   id: string
@@ -28,12 +27,17 @@ interface DailyQuestion {
   category: string
 }
 
-const FALLBACK_QUESTIONS = [
-  "How are you feeling today?",
-  "How well did you sleep last night?",
-  "Have you eaten your meals today?",
-  "Are you experiencing any physical discomfort or pain?",
-  "Is there anything particular worrying you right now?",
+interface QuestionWithCategory {
+  text: string
+  category: string
+}
+
+const FALLBACK_QUESTIONS: QuestionWithCategory[] = [
+  { text: "How are you feeling today?", category: "emotional" },
+  { text: "How well did you sleep last night?", category: "sleep" },
+  { text: "Have you eaten your meals today?", category: "daily-living" },
+  { text: "Are you experiencing any physical discomfort or pain?", category: "physical" },
+  { text: "Is there anything particular worrying you right now?", category: "anxiety" },
 ]
 
 export default function ChatbotScreen() {
@@ -42,12 +46,16 @@ export default function ChatbotScreen() {
 
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
-  const [questionIndex, setQuestionIndex] = useState(0)
-  const [userAnswers, setUserAnswers] = useState<string[]>([])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
-  const [dailyQuestions, setDailyQuestions] = useState<string[]>([])
+  const [dailyQuestions, setDailyQuestions] = useState<QuestionWithCategory[]>([])
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(true)
+  const [displayIndex, setDisplayIndex] = useState(0)
+
+  // Use refs for mutable tracking to avoid stale closure issues in setTimeout
+  const questionsRef = useRef<QuestionWithCategory[]>([])
+  const answersRef = useRef<string[]>([])
+  const questionIndexRef = useRef(0)
 
   useEffect(() => {
     fetchDailyQuestions()
@@ -61,24 +69,26 @@ export default function ChatbotScreen() {
       const response = await fetch(`${API_URL}/questions/daily`)
       const data = await response.json()
 
-      let questions: string[]
+      let questions: QuestionWithCategory[]
 
       if (response.ok && data.success && data.data?.questions?.length > 0) {
-        questions = data.data.questions.map(
-          (q: DailyQuestion) => q.questionText
-        )
+        questions = data.data.questions.map((q: DailyQuestion) => ({
+          text: q.questionText,
+          category: q.category,
+        }))
       } else {
         questions = FALLBACK_QUESTIONS
       }
 
       setDailyQuestions(questions)
+      questionsRef.current = questions
       setIsLoadingQuestions(false)
 
       // Show greeting then ask first question
       setMessages([
         {
           id: "1",
-          text: `Hello! I'm here to check in on how you're doing today. I'll ask you ${questions.length} simple questions about your well-being. Please answer honestly so I can better understand how you're feeling. 😊`,
+          text: `Hello! I'm here to check in on how you're doing today. I'll ask you ${questions.length} simple questions about your well-being. Please answer honestly so I can better understand how you're feeling.`,
           sender: "bot",
         },
       ])
@@ -86,7 +96,7 @@ export default function ChatbotScreen() {
       setTimeout(() => {
         const botMessage: Message = {
           id: Date.now().toString(),
-          text: `Question 1/${questions.length}: ${questions[0]}`,
+          text: `Question 1/${questions.length}: ${questions[0].text}`,
           sender: "bot",
         }
         setMessages((prev) => [...prev, botMessage])
@@ -95,12 +105,13 @@ export default function ChatbotScreen() {
       console.error("Error fetching daily questions:", error)
       const questions = FALLBACK_QUESTIONS
       setDailyQuestions(questions)
+      questionsRef.current = questions
       setIsLoadingQuestions(false)
 
       setMessages([
         {
           id: "1",
-          text: `Hello! I'm here to check in on how you're doing today. I'll ask you ${questions.length} simple questions about your well-being. Please answer honestly so I can better understand how you're feeling. 😊`,
+          text: `Hello! I'm here to check in on how you're doing today. I'll ask you ${questions.length} simple questions about your well-being. Please answer honestly so I can better understand how you're feeling.`,
           sender: "bot",
         },
       ])
@@ -108,7 +119,7 @@ export default function ChatbotScreen() {
       setTimeout(() => {
         const botMessage: Message = {
           id: Date.now().toString(),
-          text: `Question 1/${questions.length}: ${questions[0]}`,
+          text: `Question 1/${questions.length}: ${questions[0].text}`,
           sender: "bot",
         }
         setMessages((prev) => [...prev, botMessage])
@@ -123,62 +134,107 @@ export default function ChatbotScreen() {
     }, 100)
   }, [messages])
 
-  const askNextQuestion = () => {
-    if (questionIndex < dailyQuestions.length) {
-      const botMessage: Message = {
-        id: Date.now().toString(),
-        text: `Question ${questionIndex + 1}/${dailyQuestions.length}: ${dailyQuestions[questionIndex]}`,
-        sender: "bot",
-      }
-      setMessages((prev) => [...prev, botMessage])
-    } else {
-      // All questions answered - analyze mood
-      analyzeMoodAndNavigate()
-    }
-  }
-
-  const analyzeMoodAndNavigate = async () => {
+  const saveResponsesAndFinish = async (collectedAnswers: string[]) => {
     setIsAnalyzing(true)
 
-    const loadingMessage: Message = {
+    const savingMessage: Message = {
       id: Date.now().toString(),
-      text: "Thank you for sharing! Let me analyze your responses and provide personalized recommendations... 🤔",
+      text: "Thank you for sharing! I'm analyzing your responses now...",
       sender: "bot",
     }
-    setMessages((prev) => [...prev, loadingMessage])
+    setMessages((prev) => [...prev, savingMessage])
+
+    // Build question-answer pairs using the passed-in answers (not stale state)
+    const questions = questionsRef.current
+    const questionAnswers = questions.map((q, i) => ({
+      question: q.text,
+      answer: collectedAnswers[i] || "",
+      category: q.category,
+    }))
+
+    console.log("[Chatbot] Sending answers for analysis:", JSON.stringify(questionAnswers))
 
     try {
-      const analysis: MoodAnalysis = await analyzeMood(userAnswers)
+      const token = await AsyncStorage.getItem("authToken")
+      const API_URL =
+        process.env.EXPO_PUBLIC_API_URL || "http://localhost:5000/api"
 
-      // Save mood data
-      await AsyncStorage.setItem("todayMood", analysis.mood)
+      // Call the AI mood analysis endpoint
+      const res = await fetch(`${API_URL}/mood/analyze`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ questionAnswers }),
+      })
+
+      const data = await res.json()
+      console.log("[Chatbot] Analysis response:", JSON.stringify(data))
+
       await AsyncStorage.setItem("lastCheckIn", new Date().toISOString())
-      await AsyncStorage.setItem("moodAnalysis", JSON.stringify(analysis))
 
       setIsAnalyzing(false)
       setIsComplete(true)
 
-      const resultMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: "Analysis complete! Let me show you some personalized recommendations based on how you're feeling. 💚",
-        sender: "bot",
-      }
-      setMessages((prev) => [...prev, resultMessage])
+      if (res.ok && data.success) {
+        const moodResult = data.data
 
-      // Navigate to results page after a delay
-      setTimeout(() => {
-        router.push({
-          pathname: "/mood-results",
-          params: { analysisData: JSON.stringify(analysis) },
-        })
-      }, 2000)
+        // Show empathetic message based on mood
+        let empathyText = ""
+        if (moodResult.mood === "Highly Depressed" || moodResult.mood === "Depressed") {
+          empathyText =
+            "I can sense you're going through a tough time. Please know that you're not alone, and there are people who care about you deeply. Let me guide you to some activities that might help."
+        } else if (moodResult.mood === "Stressed") {
+          empathyText =
+            "It sounds like you have some things on your mind. That's completely normal. Let me show you your results and suggest some relaxing activities."
+        } else {
+          empathyText =
+            "Wonderful! You seem to be doing well today. Let's keep that positive energy going!"
+        }
+
+        const doneMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: empathyText,
+          sender: "bot",
+        }
+        setMessages((prev) => [...prev, doneMessage])
+
+        // Navigate to mood results screen after a brief pause
+        setTimeout(() => {
+          router.replace({
+            pathname: "/mood-results",
+            params: {
+              analysisData: JSON.stringify({
+                mood: moodResult.mood,
+                confidence: moodResult.confidence,
+                emotionsDetected: moodResult.emotionsDetected,
+                reason: moodResult.reason,
+                analysisSource: moodResult.analysisSource,
+              }),
+            },
+          })
+        }, 3000)
+      } else {
+        const errorMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          text: "There was an issue analyzing your responses, but don't worry. Your answers have been recorded. Please try again later.",
+          sender: "bot",
+        }
+        setMessages((prev) => [...prev, errorMsg])
+
+        setTimeout(() => {
+          router.replace("/(tabs)")
+        }, 2500)
+      }
     } catch (error) {
-      console.error("Error analyzing mood:", error)
+      console.error("Error analyzing responses:", error)
       setIsAnalyzing(false)
+      setIsComplete(true)
 
       const errorMessage: Message = {
         id: (Date.now() + 2).toString(),
-        text: "I had some trouble analyzing your responses. Please try again later or check your internet connection.",
+        text: "Failed to analyze responses. Please check your connection and try again.",
         sender: "bot",
       }
       setMessages((prev) => [...prev, errorMessage])
@@ -188,27 +244,46 @@ export default function ChatbotScreen() {
   const sendMessage = () => {
     if (input.trim() === "" || isComplete) return
 
+    const currentAnswer = input.trim()
+
     // Add user message
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: input,
+      text: currentAnswer,
       sender: "user",
     }
     setMessages((prev) => [...prev, userMessage])
 
-    // Save answer
-    const newAnswers = [...userAnswers, input]
-    setUserAnswers(newAnswers)
+    // Save answer to ref immediately (no stale closure issue)
+    answersRef.current = [...answersRef.current, currentAnswer]
+    const nextIndex = questionIndexRef.current + 1
+    questionIndexRef.current = nextIndex
+
+    // Update display state
+    setDisplayIndex(nextIndex)
 
     setInput("")
 
-    // Move to next question
-    setQuestionIndex((prev) => prev + 1)
+    const questions = questionsRef.current
 
-    // Ask next question after delay
-    setTimeout(() => {
-      askNextQuestion()
-    }, 800)
+    // Check if all questions have been answered
+    if (nextIndex >= questions.length) {
+      // All questions answered - start analysis with the collected answers
+      const allAnswers = [...answersRef.current]
+      setTimeout(() => {
+        saveResponsesAndFinish(allAnswers)
+      }, 800)
+    } else {
+      // Ask next question after delay
+      setTimeout(() => {
+        const botMessage: Message = {
+          id: Date.now().toString(),
+          text: `Question ${nextIndex + 1}/${questions.length}: ${questions[nextIndex].text}`,
+          sender: "bot",
+        }
+        setMessages((prev) => [...prev, botMessage])
+      }, 800)
+    }
   }
 
   const renderItem = ({ item }: { item: Message }) => (
@@ -273,7 +348,7 @@ export default function ChatbotScreen() {
           <View style={styles.headerTitle}>
             <Text style={styles.headerText}>Daily Check-In</Text>
             <Text style={styles.headerSubtext}>
-              {questionIndex}/{dailyQuestions.length} questions
+              {displayIndex}/{dailyQuestions.length} questions
             </Text>
           </View>
           <View style={{ width: 28 }} />
