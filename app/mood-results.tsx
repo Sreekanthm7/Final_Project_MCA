@@ -32,7 +32,7 @@ export default function MoodResultsScreen() {
         console.error("Error parsing analysis data:", error)
       }
     }
-  }, [params])
+  }, [params.analysisData])
 
   if (!analysis) {
     return (

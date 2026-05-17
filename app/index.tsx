@@ -20,7 +20,8 @@ export default function Index() {
     } else {
       router.replace("/Login" as any)
     }
-  }, [isInitialized, userType, router])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInitialized, userType])
 
   // Show loading screen while checking authentication
   return (

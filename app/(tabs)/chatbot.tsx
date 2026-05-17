@@ -40,6 +40,13 @@ const FALLBACK_QUESTIONS: QuestionWithCategory[] = [
   { text: "Is there anything particular worrying you right now?", category: "anxiety" },
 ]
 
+interface TodayStatus {
+  completed: boolean
+  mood?: string
+  reason?: string
+  completedAt?: string
+}
+
 export default function ChatbotScreen() {
   const router = useRouter()
   const flatListRef = useRef<FlatList>(null)
@@ -51,6 +58,7 @@ export default function ChatbotScreen() {
   const [dailyQuestions, setDailyQuestions] = useState<QuestionWithCategory[]>([])
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(true)
   const [displayIndex, setDisplayIndex] = useState(0)
+  const [alreadyCompleted, setAlreadyCompleted] = useState<TodayStatus | null>(null)
 
   // Use refs for mutable tracking to avoid stale closure issues in setTimeout
   const questionsRef = useRef<QuestionWithCategory[]>([])
@@ -58,8 +66,37 @@ export default function ChatbotScreen() {
   const questionIndexRef = useRef(0)
 
   useEffect(() => {
-    fetchDailyQuestions()
+    checkTodayStatus()
   }, [])
+
+  const checkTodayStatus = async () => {
+    try {
+      const token = await AsyncStorage.getItem("authToken")
+      const API_URL =
+        process.env.EXPO_PUBLIC_API_URL || "http://localhost:5000/api"
+
+      const res = await fetch(`${API_URL}/mood/today-status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+
+      if (res.ok && data.success && data.completed) {
+        setAlreadyCompleted({
+          completed: true,
+          mood: data.data.mood,
+          reason: data.data.reason,
+          completedAt: data.data.completedAt,
+        })
+        setIsLoadingQuestions(false)
+        return
+      }
+    } catch (error) {
+      console.error("Error checking today status:", error)
+    }
+
+    // Not completed yet — fetch questions
+    fetchDailyQuestions()
+  }
 
   const fetchDailyQuestions = async () => {
     setIsLoadingQuestions(true)
@@ -333,6 +370,67 @@ export default function ChatbotScreen() {
     )
   }
 
+  if (alreadyCompleted) {
+    const moodEmoji =
+      alreadyCompleted.mood === "Normal" || alreadyCompleted.mood === "happy"
+        ? "😊"
+        : alreadyCompleted.mood === "Stressed" || alreadyCompleted.mood === "neutral"
+        ? "😐"
+        : "😔"
+
+    return (
+      <View style={styles.container}>
+        <LinearGradient
+          colors={["#667eea", "#764ba2"]}
+          style={styles.header}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+        >
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={28} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.headerTitle}>
+              <Text style={styles.headerText}>Daily Check-In</Text>
+            </View>
+            <View style={{ width: 28 }} />
+          </View>
+        </LinearGradient>
+        <View style={styles.completedContainer}>
+          <View style={styles.completedCard}>
+            <Ionicons name="checkmark-circle" size={80} color="#43e97b" />
+            <Text style={styles.completedTitle}>
+              Already Completed!
+            </Text>
+            <Text style={styles.completedSubtitle}>
+              You've already answered today's check-in questions.
+            </Text>
+            <View style={styles.completedMoodRow}>
+              <Text style={styles.completedMoodEmoji}>{moodEmoji}</Text>
+              <Text style={styles.completedMoodText}>
+                Today's Mood: {alreadyCompleted.mood}
+              </Text>
+            </View>
+            {alreadyCompleted.reason ? (
+              <Text style={styles.completedReason}>
+                {alreadyCompleted.reason}
+              </Text>
+            ) : null}
+            <Text style={styles.completedNextDay}>
+              Come back tomorrow for new questions!
+            </Text>
+            <TouchableOpacity
+              style={styles.completedButton}
+              onPress={() => router.back()}
+            >
+              <Text style={styles.completedButtonText}>Back to Home</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    )
+  }
+
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -518,5 +616,81 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: "#666",
+  },
+  completedContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 30,
+  },
+  completedCard: {
+    backgroundColor: "#fff",
+    borderRadius: 25,
+    padding: 30,
+    alignItems: "center",
+    width: "100%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  completedTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#333",
+    marginTop: 15,
+  },
+  completedSubtitle: {
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+    marginTop: 8,
+    lineHeight: 22,
+  },
+  completedMoodRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 20,
+    backgroundColor: "#f0f0ff",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 15,
+  },
+  completedMoodEmoji: {
+    fontSize: 28,
+    marginRight: 10,
+  },
+  completedMoodText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#444",
+  },
+  completedReason: {
+    fontSize: 14,
+    color: "#777",
+    textAlign: "center",
+    marginTop: 12,
+    lineHeight: 20,
+    fontStyle: "italic",
+  },
+  completedNextDay: {
+    fontSize: 15,
+    color: "#667eea",
+    fontWeight: "600",
+    marginTop: 20,
+    textAlign: "center",
+  },
+  completedButton: {
+    backgroundColor: "#667eea",
+    paddingHorizontal: 30,
+    paddingVertical: 14,
+    borderRadius: 15,
+    marginTop: 20,
+  },
+  completedButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
   },
 })
